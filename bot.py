@@ -1,38 +1,87 @@
+import os
 import logging
-import json  # ← ДОБАВЛЕНО
+import json
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
 import sqlite3
 from datetime import datetime, timedelta
+import flask
+from flask import Flask, request
 
 # ==================== НАСТРОЙКА ====================
-TOKEN = "8535796327:AAHT3j-bYcL15CkPDN2y27UlAmn-ajBVhjc"  # ← ВСТАВЬТЕ ПРАВИЛЬНЫЙ ТОКЕН!
+from dotenv import load_dotenv
+load_dotenv()
 
-# База данных
-conn = sqlite3.connect('character_stats.db')
-cursor = conn.cursor()
+TOKEN = os.getenv('BOT_TOKEN')
+RAILWAY_STATIC_URL = os.getenv('RAILWAY_STATIC_URL')
+WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', '/webhook')
+WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', 'your-secret-token')
+PORT = int(os.getenv('PORT', 8000))
 
-# ==================== СОЗДАНИЕ ТАБЛИЦЫ ====================
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id INTEGER,
-        user_id INTEGER,
-        username TEXT,
-        character_name TEXT,
-        message_date DATETIME,
-        char_count INTEGER DEFAULT 0,
-        points INTEGER DEFAULT 1
+# Проверяем переменные окружения
+if not TOKEN:
+    logging.error("❌ BOT_TOKEN не установлен!")
+    exit(1)
+
+# База данных (для Railway используем PostgreSQL)
+DATABASE_URL = os.getenv('DATABASE_URL')
+if DATABASE_URL:
+    # Используем PostgreSQL на Railway
+    import psycopg2
+    from psycopg2 import pool
+    
+    # Создаем пул соединений
+    connection_pool = psycopg2.pool.SimpleConnectionPool(
+        1, 20, DATABASE_URL, sslmode='require'
     )
-''')
-conn.commit()
-
-# Яркое логирование
-logging.basicConfig(
-    format='%(asctime)s - 🤖 - %(message)s',
-    level=logging.INFO,
-    datefmt='%H:%M:%S'
-)
+    
+    def get_db_connection():
+        return connection_pool.getconn()
+    
+    def return_db_connection(conn):
+        connection_pool.putconn(conn)
+    
+    def init_db():
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS posts (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT,
+                user_id BIGINT,
+                username TEXT,
+                character_name TEXT,
+                message_date TIMESTAMP,
+                char_count INTEGER DEFAULT 0,
+                points INTEGER DEFAULT 1
+            )
+        ''')
+        conn.commit()
+        return_db_connection(conn)
+        logging.info("✅ Таблица PostgreSQL создана")
+    
+    init_db()
+else:
+    # Локальный режим с SQLite
+    conn = sqlite3.connect('character_stats.db')
+    cursor = conn.cursor()
+    
+    def init_db():
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                user_id INTEGER,
+                username TEXT,
+                character_name TEXT,
+                message_date DATETIME,
+                char_count INTEGER DEFAULT 0,
+                points INTEGER DEFAULT 1
+            )
+        ''')
+        conn.commit()
+    
+    init_db()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 def calculate_points(char_count):
@@ -82,6 +131,10 @@ def decline_posts(posts):
     else:
         return "постов"
 
+# ==================== ОСНОВНЫЕ ФУНКЦИИ (остаются без изменений) ====================
+# Вставьте сюда ВСЕ функции из нашего кода:
+# handle_message, start_command, get_user_stats, stats_command, top_command, mystats_command
+# ... (все функции остаются такими же, как в последней версии)
 # ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
 async def handle_message(update: Update, context):
     """Обработка сообщений в ГРУППАХ"""
@@ -484,30 +537,92 @@ async def mystats_command(update: Update, context):
     await update.message.reply_text(text)
 
 # ==================== ЗАПУСК БОТА ====================
-def main():
-    logging.info("=" * 50)
-    logging.info("🚀 ЗАПУСКАЕМ БОТА СО СТАТИСТИКОЙ ПО ПОЛЬЗОВАТЕЛЯМ...")
-    logging.info("=" * 50)
+===============
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    """Домашняя страница для health check"""
+    return {
+        "status": "online",
+        "service": "telegram-character-counter-bot",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.route('/health')
+def health():
+    """Health check для Railway"""
+    try:
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat()
+        }, 200
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }, 500
+
+@app.route(WEBHOOK_PATH, methods=['POST'])
+def webhook():
+    """Обработчик вебхука от Telegram"""
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+        return 'Unauthorized', 403
     
-    app = Application.builder().token(TOKEN).build()
+    update = Update.de_json(request.get_json(), telegram_app.bot)
+    telegram_app.update_queue.put_nowait(update)
     
-    # ========== РЕГИСТРАЦИЯ КОМАНД ==========
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("top", top_command))
-    app.add_handler(CommandHandler("mystats", mystats_command))
+    return 'OK', 200
+
+# ==================== ЗАПУСК ====================
+async def setup_webhook(application: Application):
+    """Настройка вебхука"""
+    webhook_url = f"{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
     
-    # Обработчик сообщений ТОЛЬКО для групп
-    app.add_handler(MessageHandler(
+    await application.bot.set_webhook(
+        url=webhook_url,
+        secret_token=WEBHOOK_SECRET,
+        drop_pending_updates=True
+    )
+    
+    logging.info(f"✅ Вебхук установлен: {webhook_url}")
+
+def create_telegram_app():
+    """Создание Telegram приложения"""
+    application = Application.builder().token(TOKEN).build()
+    
+    # Регистрация команд
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("top", top_command))
+    application.add_handler(CommandHandler("mystats", mystats_command))
+    
+    # Обработчик сообщений
+    application.add_handler(MessageHandler(
         filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
         handle_message
     ))
     
-    logging.info("✅ Бот готов к работе!")
-    logging.info("📊 Статистика группируется по пользователям (JSON формат)")
-    logging.info("⏳ Ждем сообщения в группах...")
+    # Настройка вебхука при запуске
+    application.post_init(setup_webhook)
     
-    app.run_polling()
+    return application
 
+# Глобальная переменная для Telegram приложения
+telegram_app = create_telegram_app()
+
+# Запуск Flask приложения
 if __name__ == '__main__':
-    main()
+    logging.basicConfig(
+        format='%(asctime)s - 🤖 - %(message)s',
+        level=logging.INFO,
+        datefmt='%H:%M:%S'
+    )
+    
+    logging.info("=" * 50)
+    logging.info("🚀 Запуск бота на Railway...")
+    logging.info("=" * 50)
+    
+    # Запускаем Flask сервер
+    app.run(host='0.0.0.0', port=PORT)
