@@ -1,27 +1,31 @@
 import os
 import logging
-import json
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telegram import Update
-import sqlite3
-from datetime import datetime, timedelta
-import flask
-from flask import Flask, request
+from telegram.ext import ContextTypes
+from flask import Flask, request, jsonify
+import asyncio
 
-# ==================== НАСТРОЙКА ====================
-from dotenv import load_dotenv
-load_dotenv()
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
+# ==================== FLASK APP ====================
+app = Flask(__name__)
+
+# Конфигурация
 TOKEN = os.getenv('BOT_TOKEN')
-RAILWAY_STATIC_URL = os.getenv('RAILWAY_STATIC_URL')
-WEBHOOK_PATH = os.getenv('WEBHOOK_PATH', '/webhook')
 WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', 'your-secret-token')
-PORT = int(os.getenv('PORT', 8000))
+WEBHOOK_PATH = '/webhook'
 
-# Проверяем переменные окружения
-if not TOKEN:
-    logging.error("❌ BOT_TOKEN не установлен!")
-    exit(1)
+# ==================== ТЕЛЕГРАМ БОТ ====================
+# Инициализация приложения Telegram
+telegram_app = Application.builder().token(TOKEN).build()
+
+# Ваши обработчики (оставьте свои как есть)
 
 # База данных (для Railway используем PostgreSQL)
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -536,6 +540,121 @@ async def mystats_command(update: Update, context):
     
     await update.message.reply_text(text)
 
+# ==================== WEBHOOK HANDLERS ====================
+@app.route('/')
+def home():
+    """Домашняя страница для health check"""
+    return jsonify({
+        "status": "online",
+        "service": "telegram-bot-webhook",
+        "webhook": f"{request.host_url.rstrip('/')}{WEBHOOK_PATH}"
+    })
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy"}), 200
+
+@app.route(WEBHOOK_PATH, methods=['POST'])
+async def webhook():
+    """Основной endpoint для вебхука Telegram"""
+    # Проверка секретного токена (опционально)
+    if WEBHOOK_SECRET and request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+        return 'Unauthorized', 403
+    
+    try:
+        # Обработка обновления
+        update = Update.de_json(request.get_json(), telegram_app.bot)
+        await telegram_app.initialize()
+        await telegram_app.process_update(update)
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Error processing update: {e}")
+        return 'Internal Server Error', 500
+
+@app.route('/set_webhook', methods=['POST'])
+async def set_webhook_route():
+    """Ручка для установки вебхука (вызывается при деплое)"""
+    try:
+        webhook_url = f"{request.host_url.rstrip('/')}{WEBHOOK_PATH}"
+        
+        # Устанавливаем вебхук
+        await telegram_app.bot.set_webhook(
+            url=webhook_url,
+            secret_token=WEBHOOK_SECRET,
+            drop_pending_updates=True
+        )
+        
+        logger.info(f"✅ Webhook set to: {webhook_url}")
+        return jsonify({
+            "success": True,
+            "webhook_url": webhook_url,
+            "message": "Webhook set successfully"
+        })
+    except Exception as e:
+        logger.error(f"❌ Failed to set webhook: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/delete_webhook', methods=['POST'])
+async def delete_webhook_route():
+    """Удаление вебхука"""
+    try:
+        await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+        return jsonify({"success": True, "message": "Webhook deleted"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ==================== ЗАПУСК ====================
+def setup_webhook_on_startup():
+    """Установка вебхука при запуске приложения"""
+    import threading
+    import time
+    
+    def set_webhook_thread():
+        # Ждем немного чтобы Flask запустился
+        time.sleep(3)
+        
+        try:# Создаем контекст приложения
+            with app.app_context():
+                webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', '')}{WEBHOOK_PATH}"
+                if webhook_url.startswith("https://"):
+                    asyncio.run(telegram_app.bot.set_webhook(
+                        url=webhook_url,
+                        secret_token=WEBHOOK_SECRET,
+                        drop_pending_updates=True
+                    ))
+                    logger.info(f"✅ Webhook auto-set to: {webhook_url}")
+        except Exception as e:
+            logger.error(f"⚠️ Auto webhook setup failed: {e}. Set manually via /set_webhook")
+
+    # Запускаем в отдельном потоке
+    thread = threading.Thread(target=set_webhook_thread, daemon=True)
+    thread.start()
+
+# Запускаем установку вебхука при импорте
+if os.getenv('RENDER') or os.getenv('AUTO_SET_WEBHOOK'):
+    setup_webhook_on_startup()
+
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # ==================== ЗАПУСК БОТА ====================
 ===============
 app = Flask(__name__)
@@ -626,3 +745,4 @@ if __name__ == '__main__':
     
     # Запускаем Flask сервер
     app.run(host='0.0.0.0', port=PORT)
+
