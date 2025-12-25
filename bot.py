@@ -1,8 +1,10 @@
 import os
 import logging
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+import json
+import sqlite3
+from datetime import datetime, timedelta
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram import Update
-from telegram.ext import ContextTypes
 from flask import Flask, request, jsonify
 import asyncio
 
@@ -20,57 +22,56 @@ app = Flask(__name__)
 TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_SECRET = os.getenv('WEBHOOK_SECRET', 'your-secret-token')
 WEBHOOK_PATH = '/webhook'
-
-# ==================== ТЕЛЕГРАМ БОТ ====================
-# Инициализация приложения Telegram
-telegram_app = Application.builder().token(TOKEN).build()
-
-# Ваши обработчики (оставьте свои как есть)
-
-# База данных (для Railway используем PostgreSQL)
 DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL:
-    # Используем PostgreSQL на Railway
-    import psycopg2
-    from psycopg2 import pool
+
+# Глобальные переменные для БД
+DB_TYPE = None
+conn = None
+cursor = None
+connection_pool = None
+
+# ==================== БАЗА ДАННЫХ ====================
+def init_database():
+    """Инициализация базы данных"""
+    global DB_TYPE, conn, cursor, connection_pool
     
-    # Создаем пул соединений
-    connection_pool = psycopg2.pool.SimpleConnectionPool(
-        1, 20, DATABASE_URL, sslmode='require'
-    )
-    
-    def get_db_connection():
-        return connection_pool.getconn()
-    
-    def return_db_connection(conn):
-        connection_pool.putconn(conn)
-    
-    def init_db():
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS posts (
-                id SERIAL PRIMARY KEY,
-                chat_id BIGINT,
-                user_id BIGINT,
-                username TEXT,
-                character_name TEXT,
-                message_date TIMESTAMP,
-                char_count INTEGER DEFAULT 0,
-                points INTEGER DEFAULT 1
+    if DATABASE_URL and DATABASE_URL.startswith('postgres'):
+        try:
+            import psycopg2
+            from psycopg2 import pool
+            
+            connection_pool = psycopg2.pool.SimpleConnectionPool(
+                1, 20, DATABASE_URL, sslmode='require'
             )
-        ''')
-        conn.commit()
-        return_db_connection(conn)
-        logging.info("✅ Таблица PostgreSQL создана")
-    
-    init_db()
-else:
-    # Локальный режим с SQLite
-    conn = sqlite3.connect('character_stats.db')
-    cursor = conn.cursor()
-    
-    def init_db():
+            
+            conn = connection_pool.getconn()
+            cursor = conn.cursor()
+            DB_TYPE = 'postgres'
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS posts (
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT,
+                    user_id BIGINT,
+                    username TEXT,
+                    character_name TEXT,
+                    message_date TIMESTAMP,
+                    char_count INTEGER DEFAULT 0,
+                    points INTEGER DEFAULT 1
+                )
+            ''')
+            conn.commit()
+            connection_pool.putconn(conn)
+            logger.info("✅ PostgreSQL база инициализирована")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка PostgreSQL: {e}")
+            DB_TYPE = 'sqlite'
+    else:
+        DB_TYPE = 'sqlite'
+        conn = sqlite3.connect('character_stats.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,8 +85,10 @@ else:
             )
         ''')
         conn.commit()
-    
-    init_db()
+        logger.info("✅ SQLite база инициализирована")
+
+# Инициализируем БД
+init_database()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 def calculate_points(char_count):
@@ -135,17 +138,13 @@ def decline_posts(posts):
     else:
         return "постов"
 
-# ==================== ОСНОВНЫЕ ФУНКЦИИ (остаются без изменений) ====================
-# Вставьте сюда ВСЕ функции из нашего кода:
-# handle_message, start_command, get_user_stats, stats_command, top_command, mystats_command
-# ... (все функции остаются такими же, как в последней версии)
-# ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
-async def handle_message(update: Update, context):
+# ==================== ОСНОВНЫЕ ФУНКЦИИ БОТА ====================
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка сообщений в ГРУППАХ"""
     try:
         # БЛОКИРУЕМ личные сообщения
         if update.message.chat.type == 'private':
-            logging.info(f"🚫 Игнорируем ЛС от {update.effective_user.first_name}")
+            logger.info(f"🚫 Игнорируем ЛС от {update.effective_user.first_name}")
             return
         
         text = update.message.text
@@ -166,29 +165,50 @@ async def handle_message(update: Update, context):
             user = update.message.from_user
             display_name = f"@{user.username}" if user.username else user.first_name
             
-            cursor.execute(
-                """INSERT INTO posts 
-                   (chat_id, user_id, username, character_name, message_date, char_count, points) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (update.message.chat_id, 
-                 user.id,
-                 display_name,
-                 character_name,
-                 update.message.date,
-                 char_count,
-                 points)
-            )
-            conn.commit()
+            if DB_TYPE == 'postgres':
+                # Для PostgreSQL
+                import psycopg2
+                temp_conn = connection_pool.getconn()
+                temp_cursor = temp_conn.cursor()
+                temp_cursor.execute(
+                    """INSERT INTO posts 
+                       (chat_id, user_id, username, character_name, message_date, char_count, points) 
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (update.message.chat_id, 
+                     user.id,
+                     display_name,
+                     character_name,
+                     update.message.date,
+                     char_count,
+                     points)
+                )
+                temp_conn.commit()
+                connection_pool.putconn(temp_conn)
+            else:
+                # Для SQLite
+                cursor.execute(
+                    """INSERT INTO posts 
+                       (chat_id, user_id, username, character_name, message_date, char_count, points) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (update.message.chat_id, 
+                     user.id,
+                     display_name,
+                     character_name,
+                     update.message.date,
+                     char_count,
+                     points)
+                )
+                conn.commit()
             
-            logging.info(f"✅ Сохранено: {display_name} - '{character_name}' - {char_count} симв., {points} {decline_points(points)}")
+            logger.info(f"✅ Сохранено: {display_name} - '{character_name}' - {char_count} симв., {points} {decline_points(points)}")
             
     except Exception as e:
-        logging.error(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка в handle_message: {e}")
 
-async def start_command(update: Update, context):
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - работает только в группах"""
     if update.message.chat.type == 'private':
-        logging.info(f"🚫 Игнорируем /start в ЛС от {update.effective_user.first_name}")
+        logger.info(f"🚫 Игнорируем /start в ЛС от {update.effective_user.first_name}")
         return
     
     await update.message.reply_text(
@@ -217,17 +237,20 @@ async def start_command(update: Update, context):
         "📊 Доступные команды:\n"
         "/stats [period] - полная статистика (today/week/month/all)\n"
         "/top [period] - топ-10 пользователей (today/week/month/all)\n"
-        "/mystats - ваши персонажи и статистика"
+        "/mystats -ваши персонажи и статистика"
     )
 
 async def get_user_stats(chat_id, period='month'):
-    """Получает статистику по пользователям за период (JSON формат)"""
+    """Получает статистику по пользователям за период"""
     now = datetime.now()
     
     # Определяем дату начала периода
     if period == 'today':
         start_date = now.date()
-        condition = "AND DATE(message_date) = DATE(?)"
+        if DB_TYPE == 'postgres':
+            condition = "AND DATE(message_date) = %s"
+        else:
+            condition = "AND DATE(message_date) = DATE(?)"
         params = (chat_id, start_date)
     elif period == 'week':
         start_date = now - timedelta(days=7)
@@ -257,8 +280,16 @@ async def get_user_stats(chat_id, period='month'):
         ORDER BY p.user_id, COALESCE(SUM(p.points), 0) DESC
     '''
     
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
+    # Выполняем запрос
+    if DB_TYPE == 'postgres':
+        temp_conn = connection_pool.getconn()
+        temp_cursor = temp_conn.cursor()
+        temp_cursor.execute(query.replace('?', '%s'), params)
+        rows = temp_cursor.fetchall()
+        connection_pool.putconn(temp_conn)
+    else:
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
     
     # Группируем вручную в Python
     user_stats = {}
@@ -290,13 +321,12 @@ async def get_user_stats(chat_id, period='month'):
     # Преобразуем в нужный формат
     result = []
     for user_id, data in user_stats.items():
-        # Сохраняем персонажей как JSON строку
         characters_json = json.dumps(data['characters'], ensure_ascii=False)
         
         result.append((
             user_id,
             data['username'],
-            characters_json,  # JSON вместо строки с разделителями
+            characters_json,
             data['total_posts'],
             data['total_chars'],
             data['total_points'],
@@ -308,10 +338,10 @@ async def get_user_stats(chat_id, period='month'):
     
     return result
 
-async def stats_command(update: Update, context):
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /stats - ДЕТАЛЬНАЯ статистика по пользователям"""
     if update.message.chat.type == 'private':
-        logging.info(f"🚫 Игнорируем /stats в ЛС от {update.effective_user.first_name}")
+        logger.info(f"🚫 Игнорируем /stats в ЛС от {update.effective_user.first_name}")
         return
     
     chat_id = update.effective_chat.id
@@ -374,12 +404,11 @@ async def stats_command(update: Update, context):
                     
             except (json.JSONDecodeError, KeyError) as e:
                 text += "  Персонажи: ошибка данных\n"
-                logging.error(f"Ошибка разбора JSON: {e}")
+                logger.error(f"Ошибка разбора JSON: {e}")
         else:
             text += "  Персонажи: нет данных\n"
         
         text += "\n"
-    
     
     # Если сообщение слишком длинное, разбиваем
     if len(text) > 4000:
@@ -389,10 +418,10 @@ async def stats_command(update: Update, context):
     else:
         await update.message.reply_text(text)
 
-async def top_command(update: Update, context):
+async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /top - топ-10 пользователей за период"""
     if update.message.chat.type == 'private':
-        logging.info(f"🚫 Игнорируем /top в ЛС от {update.effective_user.first_name}")
+        logger.info(f"🚫 Игнорируем /top в ЛС от {update.effective_user.first_name}")
         return
     
     chat_id = update.effective_chat.id
@@ -470,10 +499,10 @@ async def top_command(update: Update, context):
     
     await update.message.reply_text(text)
 
-async def mystats_command(update: Update, context):
+async def mystats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /mystats - личная статистика пользователя"""
     if update.message.chat.type == 'private':
-        logging.info(f"🚫 Игнорируем /mystats в ЛС от {update.effective_user.first_name}")
+        logger.info(f"🚫 Игнорируем /mystats в ЛС от {update.effective_user.first_name}")
         return
     
     user_id = update.effective_user.id
@@ -481,35 +510,71 @@ async def mystats_command(update: Update, context):
     username = update.effective_user.username or update.effective_user.first_name
     display_name = f"@{username}" if update.effective_user.username else username
     
-    # Статистика пользователя за все время
-    cursor.execute('''
-        SELECT 
-            character_name,
-            COUNT(*) as post_count,
-            SUM(char_count) as char_count,
-            SUM(points) as points
-        FROM posts
-        WHERE chat_id = ? AND user_id = ?
-        GROUP BY character_name
-        ORDER BY points DESC
-    ''', (chat_id, user_id))
-    
-    character_stats = cursor.fetchall()
+    # Запрос для SQLite/PostgreSQL
+    if DB_TYPE == 'postgres':
+        temp_conn = connection_pool.getconn()
+        temp_cursor = temp_conn.cursor()
+        
+        # Статистика пользователя за все время
+        temp_cursor.execute('''
+            SELECT 
+                character_name,
+                COUNT(*) as post_count,
+                SUM(char_count) as char_count,
+                SUM(points) as points
+            FROM posts
+            WHERE chat_id = %s AND user_id = %s
+            GROUP BY character_name
+            ORDER BY points DESC
+        ''', (chat_id, user_id))
+        
+        character_stats = temp_cursor.fetchall()
+        
+        # Общая статистика пользователя
+        temp_cursor.execute('''
+            SELECT 
+                COUNT(*) as total_posts,
+                SUM(char_count) as total_chars,
+                SUM(points) as total_points
+            FROM posts 
+            WHERE chat_id = %s AND user_id = %s
+        ''', (chat_id, user_id))
+        
+        total_stats = temp_cursor.fetchone()
+        connection_pool.putconn(temp_conn)
+    else:
+        # Статистика пользователя за все время
+        cursor.execute('''
+            SELECT 
+                character_name,
+                COUNT(*) as post_count,
+                SUM(char_count) as char_count,
+                SUM(points) as points
+            FROM posts
+            WHERE chat_id = ? AND user_id = ?
+            GROUP BY character_name
+            ORDER BY points DESC
+        ''', (chat_id, user_id))
+        
+        character_stats = cursor.fetchall()
+        
+        # Общая статистика пользователя
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_posts,
+                SUM(char_count) as total_chars,
+                SUM(points) as total_points
+            FROM posts 
+            WHERE chat_id = ? AND user_id = ?
+        ''', (chat_id, user_id))
+        
+        total_stats = cursor.fetchone()
     
     if not character_stats:
         await update.message.reply_text(f"📭 {display_name}, у вас пока нет постов!")
         return
     
-    # Общая статистика пользователя
-    cursor.execute('''
-        SELECT 
-            COUNT(*) as total_posts,
-            SUM(char_count) as total_chars,
-            SUM(points) as total_points
-        FROM posts 
-        WHERE chat_id = ? AND user_id = ?
-    ''', (chat_id, user_id))
-    total_posts, total_chars, total_points = cursor.fetchone()
+    total_posts, total_chars, total_points = total_stats or (0, 0, 0)
     
     text = f"📊 ВАША СТАТИСТИКА {display_name.upper()}:\n\n"
     
@@ -540,30 +605,45 @@ async def mystats_command(update: Update, context):
     
     await update.message.reply_text(text)
 
-# ==================== WEBHOOK HANDLERS ====================
+# ==================== ТЕЛЕГРАМ ПРИЛОЖЕНИЕ ====================
+# Создаем Telegram приложение
+telegram_app = Application.builder().token(TOKEN).build()
+
+# Регистрация ВСЕХ обработчиков
+telegram_app.add_handler(CommandHandler("start", start_command))
+telegram_app.add_handler(CommandHandler("stats", stats_command))
+telegram_app.add_handler(CommandHandler("top", top_command))
+telegram_app.add_handler(CommandHandler("mystats", mystats_command))
+telegram_app.add_handler(MessageHandler(
+    filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
+    handle_message
+))
+
+# ==================== FLASK WEBHOOK ENDPOINTS ====================
 @app.route('/')
 def home():
-    """Домашняя страница для health check"""
     return jsonify({
         "status": "online",
-        "service": "telegram-bot-webhook",
-        "webhook": f"{request.host_url.rstrip('/')}{WEBHOOK_PATH}"
+        "service": "telegram-character-counter-bot",
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/health')
 def health():
-    """Health check endpoint"""
     return jsonify({"status": "healthy"}), 200
+
+@app.route('/ping')
+def ping():
+    """Для поддержания активности на Render"""
+    return "pong", 200
 
 @app.route(WEBHOOK_PATH, methods=['POST'])
 async def webhook():
     """Основной endpoint для вебхука Telegram"""
-    # Проверка секретного токена (опционально)
     if WEBHOOK_SECRET and request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
         return 'Unauthorized', 403
     
     try:
-        # Обработка обновления
         update = Update.de_json(request.get_json(), telegram_app.bot)
         await telegram_app.initialize()
         await telegram_app.process_update(update)
@@ -572,24 +652,21 @@ async def webhook():
         logger.error(f"Error processing update: {e}")
         return 'Internal Server Error', 500
 
-@app.route('/set_webhook', methods=['POST'])
+@app.route('/set_webhook', methods=['GET', 'POST'])
 async def set_webhook_route():
-    """Ручка для установки вебхука (вызывается при деплое)"""
+    """Ручка для установки вебхука (можно открыть в браузере)"""
     try:
         webhook_url = f"{request.host_url.rstrip('/')}{WEBHOOK_PATH}"
-        
-        # Устанавливаем вебхук
         await telegram_app.bot.set_webhook(
             url=webhook_url,
             secret_token=WEBHOOK_SECRET,
             drop_pending_updates=True
         )
-        
         logger.info(f"✅ Webhook set to: {webhook_url}")
         return jsonify({
             "success": True,
             "webhook_url": webhook_url,
-            "message": "Webhook set successfully"
+            "message": "Webhook установлен успешно! Бот готов к работе."
         })
     except Exception as e:
         logger.error(f"❌ Failed to set webhook: {e}")
@@ -600,149 +677,42 @@ async def delete_webhook_route():
     """Удаление вебхука"""
     try:
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
-        return jsonify({"success": True, "message": "Webhook deleted"})
+        return jsonify({"success": True, "message": "Webhook удален"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ==================== ЗАПУСК ====================
 def setup_webhook_on_startup():
-    """Установка вебхука при запуске приложения"""
+    """Автоматическая установка вебхука при старте"""
     import threading
     import time
     
     def set_webhook_thread():
-        # Ждем немного чтобы Flask запустился
-        time.sleep(3)
-        
-        try:# Создаем контекст приложения
-            with app.app_context():
-                webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', '')}{WEBHOOK_PATH}"
-                if webhook_url.startswith("https://"):
-                    asyncio.run(telegram_app.bot.set_webhook(
-                        url=webhook_url,
-                        secret_token=WEBHOOK_SECRET,
-                        drop_pending_updates=True
-                    ))
-                    logger.info(f"✅ Webhook auto-set to: {webhook_url}")
+        time.sleep(5)  # Ждем запуска Flask
+        try:
+            # Получаем URL из переменных окружения Render
+            render_host = os.getenv('RENDER_EXTERNAL_HOSTNAME')
+            if render_host:
+                webhook_url = f"https://{render_host}{WEBHOOK_PATH}"
+                asyncio.run(telegram_app.bot.set_webhook(
+                    url=webhook_url,
+                    secret_token=WEBHOOK_SECRET,
+                    drop_pending_updates=True
+                ))
+                logger.info(f"✅ Webhook auto-set to: {webhook_url}")
+            else:
+                logger.warning("⚠️ RENDER_EXTERNAL_HOSTNAME не найден, вебхук не установлен")
         except Exception as e:
             logger.error(f"⚠️ Auto webhook setup failed: {e}. Set manually via /set_webhook")
 
-    # Запускаем в отдельном потоке
-    thread = threading.Thread(target=set_webhook_thread, daemon=True)
-    thread.start()
+    if os.getenv('RENDER') or os.getenv('AUTO_SET_WEBHOOK'):
+        thread = threading.Thread(target=set_webhook_thread, daemon=True)
+        thread.start()
 
-# Запускаем установку вебхука при импорте
-if os.getenv('RENDER') or os.getenv('AUTO_SET_WEBHOOK'):
-    setup_webhook_on_startup()
+# Запускаем автоматическую настройку вебхука
+setup_webhook_on_startup()
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ==================== ЗАПУСК БОТА ====================
-===============
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    """Домашняя страница для health check"""
-    return {
-        "status": "online",
-        "service": "telegram-character-counter-bot",
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.route('/health')
-def health():
-    """Health check для Railway"""
-    try:
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat()
-        }, 200
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }, 500
-
-@app.route(WEBHOOK_PATH, methods=['POST'])
-def webhook():
-    """Обработчик вебхука от Telegram"""
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
-        return 'Unauthorized', 403
-    
-    update = Update.de_json(request.get_json(), telegram_app.bot)
-    telegram_app.update_queue.put_nowait(update)
-    
-    return 'OK', 200
-
-# ==================== ЗАПУСК ====================
-async def setup_webhook(application: Application):
-    """Настройка вебхука"""
-    webhook_url = f"{RAILWAY_STATIC_URL}{WEBHOOK_PATH}"
-    
-    await application.bot.set_webhook(
-        url=webhook_url,
-        secret_token=WEBHOOK_SECRET,
-        drop_pending_updates=True
-    )
-    
-    logging.info(f"✅ Вебхук установлен: {webhook_url}")
-
-def create_telegram_app():
-    """Создание Telegram приложения"""
-    application = Application.builder().token(TOKEN).build()
-    
-    # Регистрация команд
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("top", top_command))
-    application.add_handler(CommandHandler("mystats", mystats_command))
-    
-    # Обработчик сообщений
-    application.add_handler(MessageHandler(
-        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
-        handle_message
-    ))
-    
-    # Настройка вебхука при запуске
-    application.post_init(setup_webhook)
-    
-    return application
-
-# Глобальная переменная для Telegram приложения
-telegram_app = create_telegram_app()
-
-# Запуск Flask приложения
-if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s - 🤖 - %(message)s',
-        level=logging.INFO,
-        datefmt='%H:%M:%S'
-    )
-    
-    logging.info("=" * 50)
-    logging.info("🚀 Запуск бота на Railway...")
-    logging.info("=" * 50)
-    
-    # Запускаем Flask сервер
-    app.run(host='0.0.0.0', port=PORT)
 
