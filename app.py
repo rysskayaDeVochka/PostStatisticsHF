@@ -3,8 +3,8 @@ import logging
 import json
 import sqlite3
 from datetime import datetime, timedelta
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackContext
 from flask import Flask, request, jsonify
 import asyncio
 
@@ -139,7 +139,7 @@ def decline_posts(posts):
         return "постов"
 
 # ==================== ОСНОВНЫЕ ФУНКЦИИ БОТА ====================
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: CallbackContext):
     """Обработка сообщений в ГРУППАХ"""
     try:
         # БЛОКИРУЕМ личные сообщения
@@ -205,7 +205,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"❌ Ошибка в handle_message: {e}")
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start_command(update: Update, context: CallbackContext):
     """Команда /start - работает только в группах"""
     if update.message.chat.type == 'private':
         logger.info(f"🚫 Игнорируем /start в ЛС от {update.effective_user.first_name}")
@@ -338,7 +338,7 @@ async def get_user_stats(chat_id, period='month'):
     
     return result
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stats_command(update: Update, context: CallbackContext):
     """Команда /stats - ДЕТАЛЬНАЯ статистика по пользователям"""
     if update.message.chat.type == 'private':
         logger.info(f"🚫 Игнорируем /stats в ЛС от {update.effective_user.first_name}")
@@ -418,7 +418,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(text)
 
-async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def top_command(update: Update, context: CallbackContext):
     """Команда /top - топ-10 пользователей за период"""
     if update.message.chat.type == 'private':
         logger.info(f"🚫 Игнорируем /top в ЛС от {update.effective_user.first_name}")
@@ -499,7 +499,7 @@ async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(text)
 
-async def mystats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def mystats_command(update: Update, context: CallbackContext):
     """Команда /mystats - личная статистика пользователя"""
     if update.message.chat.type == 'private':
         logger.info(f"🚫 Игнорируем /mystats в ЛС от {update.effective_user.first_name}")
@@ -715,4 +715,5 @@ setup_webhook_on_startup()
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
