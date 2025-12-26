@@ -669,7 +669,6 @@ def set_webhook():
 
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
-    """Обработка вебхука Telegram (синхронная версия)"""
     if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
         return 'Unauthorized', 403
     
@@ -677,34 +676,30 @@ def webhook():
         return 'Bot not ready', 503
     
     try:
-        # Получаем данные
         data = request.get_json()
         if not data:
             return 'No data', 400
         
-        # Создаем новый event loop для ЭТОГО запроса
+        # Новый event loop для этого запроса
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
-            # Обрабатываем обновление
             update = Update.de_json(data, telegram_app.bot)
             
-            # Инициализируем приложение если нужно
-            if not telegram_app.initialized:
-                loop.run_until_complete(telegram_app.initialize())
+            # Инициализируем приложение
+            loop.run_until_complete(telegram_app.initialize())
             
-            # Обрабатываем обновление
+            # Обрабатываем обновление (твои функции работают тут)
             loop.run_until_complete(telegram_app.process_update(update))
             
         finally:
-            # Всегда закрываем loop
             loop.close()
         
         return 'OK', 200
         
     except Exception as e:
-        logger.error(f"❌ Webhook error: {e}", exc_info=True)
+        logger.error(f"❌ Webhook error: {e}")
         return 'Internal Server Error', 500
         
     
@@ -736,6 +731,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
