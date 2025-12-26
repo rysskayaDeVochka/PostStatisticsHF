@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 try:
     loop = asyncio.get_event_loop()
-expect RuntimeError:
+except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -721,6 +721,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
