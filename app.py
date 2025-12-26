@@ -1,5 +1,7 @@
 import os
 import logging
+import asyncio
+import threading
 from pymysql.cursors import DictCursor
 from flask import Flask, jsonify, request
 from telegram import Update
@@ -15,6 +17,12 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+try:
+    loop = asyncio.get_event_loop()
+expect RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
 # ==================== FLASK APP ====================
 app = Flask(__name__)
@@ -630,13 +638,12 @@ def set_webhook():
     
     try:
         render_host = os.getenv('RENDER_EXTERNAL_HOSTNAME')
-        if not render_host:
-            return jsonify({"error": "Hostname not found"}), 500
-        
         webhook_url = f"https://{render_host}{WEBHOOK_PATH}"
         
+        # Новый event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
         loop.run_until_complete(
             telegram_app.bot.set_webhook(
                 url=webhook_url,
@@ -644,16 +651,17 @@ def set_webhook():
                 drop_pending_updates=True
             )
         )
+        
         loop.close()
         
         return jsonify({
             "success": True,
             "webhook_url": webhook_url,
-            "database": "TiDB Cloud",
-            "message": "Вебхук установлен! Бот готов к работе с TiDB."
+            "message": "Вебхук установлен!"
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+        
 
 @app.route(WEBHOOK_PATH, methods=['POST'])
 def webhook():
@@ -665,22 +673,23 @@ def webhook():
     
     try:
         data = request.get_json()
+        
+        # Создаем новый event loop для этого запроса
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         update = Update.de_json(data, telegram_app.bot)
+        
+        # Запускаем синхронно
         loop.run_until_complete(telegram_app.initialize())
         loop.run_until_complete(telegram_app.process_update(update))
         
         loop.close()
         return 'OK', 200
+        
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return 'Internal Server Error', 500
-
-# Автоматическая установка вебхука
-def setup_webhook_on_startup():
-    import time
     
     def set_webhook_thread():
         time.sleep(5)
@@ -712,6 +721,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
