@@ -715,12 +715,11 @@ def webhook():
         thread = threading.Thread(target=set_webhook_thread, daemon=True)
         thread.start()
 
-setup_webhook_on_startup()
-
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
