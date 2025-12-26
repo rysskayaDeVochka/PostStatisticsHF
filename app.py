@@ -382,8 +382,8 @@ async def stats_command(update: Update, context: CallbackContext):
                     char_points_word = decline_points(char_points)
                         
                     text += f"  • {char_name}: {char_posts} {char_posts_word}, {format_number(char_chars)} симв., {char_points} {char_points_word}\n"
-        except Exception:
-            pass
+            except Exception:
+                pass
         
     text += "\n"
     
@@ -714,6 +714,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
