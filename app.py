@@ -11,6 +11,9 @@ import asyncio
 import threading
 import json
 from datetime import datetime, timedelta
+import nest_asyncio
+nest_asyncio.apply()
+
 
 # Настройка логирования
 logging.basicConfig(
@@ -731,6 +734,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
