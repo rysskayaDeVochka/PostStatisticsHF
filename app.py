@@ -712,10 +712,41 @@ async def webhook():
         thread = threading.Thread(target=set_webhook_thread, daemon=True)
         thread.start()
 
+@app.route('/test_tidb')
+def test_tidb():
+    """"Тест подключения к TiDB"""
+    try:
+        conn = pymysql.connect(
+            host='gateway01.eu-central-1.prod.aws.tidbcloud.com',
+            port=4000,
+            user='root',
+            password='ok0N4vZrAvHrhWL8',
+            database='test',
+            ssl={'ssl': {'ca': ''}}
+        )
+
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1')
+        result = cursor.fetchone()
+
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "message": f"TiDB подключена! Результат: {result}"
+        })
+
+except Exception as e:
+    return jsonify({
+        "success": False,
+        "error": str(e)
+    }), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
