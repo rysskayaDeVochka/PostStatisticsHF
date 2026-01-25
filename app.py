@@ -742,10 +742,78 @@ except Exception as e:
         "error": str(e)
     }), 500
 
+@app.route('/test_tidb_connection')
+def test_tidb_connection():
+    """Тест подключения к TiDB из Render"""
+    try:
+        # Парсим DATABASE_URL
+        import re
+        import urllib.parse
+        
+        db_url = os.getenv('DATABASE_URL')
+        if not db_url:
+            return jsonify({"error": "DATABASE_URL не найден"}), 500
+        
+        # Упрощённый парсинг
+        if db_url.startswith('mysql://'):
+            db_url = db_url[8:]  # Убираем mysql://
+        
+        # Разбираем: user:pass@host:port/db
+        auth_part, rest = db_url.split('@')
+        user, password = auth_part.split(':')
+        host_port, database = rest.split('/')
+        
+        if ':' in host_port:
+            host, port = host_port.split(':')
+            port = int(port)
+        else:
+            host = host_port
+            port = 4000
+        
+        # Пробуем подключиться
+        conn = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            ssl={'ssl': {'ca': ''}},
+            connect_timeout=10
+        )
+        
+        cursor = conn.cursor()
+        cursor.execute('SELECT VERSION()')
+        version = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT DATABASE()')
+        db_name = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "message": "✅ TiDB подключена!",
+            "version": version,
+            "database": db_name,
+            "host": host,
+            "port": port,
+            "user": user
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "database_url": os.getenv('DATABASE_URL', 'не найден')
+        }), 500
+
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
