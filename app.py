@@ -807,12 +807,16 @@ def test_tidb_connection():
             "error_type": type(e).__name__,
             "database_url": os.getenv('DATABASE_URL', 'не найден')
         }), 500
+@app.route('/simple_test')
+def simple_test():
+    return jsonify({"test": "OK"})
 
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
