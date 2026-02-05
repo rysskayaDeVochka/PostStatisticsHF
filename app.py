@@ -126,7 +126,17 @@ def init_tidb():
         return None
 
 # Инициализация TiDB
-db_pool = init_tidb()
+db_pool = None
+
+# Вместо db_pool = init_tidb() сделай:
+db_pool = None
+
+def get_db():
+    """Получаем пул соединений (инициализируем при первом вызове)"""
+    global db_pool
+    if db_pool is None:
+        db_pool = init_tidb()
+    return db_pool
 
 # ==================== ТЕЛЕГРАМ БОТ ====================
 try:
@@ -818,6 +828,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
