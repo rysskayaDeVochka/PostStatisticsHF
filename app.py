@@ -3,6 +3,7 @@ import logging
 import asyncio
 import sys
 import threading
+import pymysql
 from pymysql.cursors import DictCursor
 from flask import Flask, jsonify, request
 from telegram import Update
@@ -816,6 +817,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
