@@ -110,12 +110,14 @@ def init_tidb():
         
         logger.info("✅ TiDB Cloud инициализирована (5 ГБ бесплатно!)")
         
-        # Создаем пул соединений
-        return pymysql.pool.ConnectionPool(
+    
+        # Используем pymysql.pool вместо pool
+        return pymysql.pool.ConnectionPool(  
             size=5,
             maxsize=20,
             **db_config
         )
+
         
     except Exception as e:
         logger.error(f"❌ Ошибка TiDB: {e}")
@@ -130,18 +132,7 @@ def get_db():
     if db_pool is None:
         db_pool = init_tidb()
     return db_pool
-    def init_tidb():
-    # ... твой код ...
     
-    logger.info("✅ TiDB Cloud инициализирована")
-    
-    # Используем pymysql.pool вместо pool
-    return pymysql.pool.ConnectionPool(  
-        size=5,
-        maxsize=20,
-        **db_config
-    )
-
 # ==================== ТЕЛЕГРАМ БОТ ====================
 try:
     telegram_app = Application.builder().token(TOKEN).build()
@@ -832,6 +823,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
