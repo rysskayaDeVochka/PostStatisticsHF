@@ -74,13 +74,12 @@ def parse_tidb_url(url):
         return None
 
 def init_tidb():
-    """Инициализация TiDB Cloud (MySQL-совместимая)"""
+    """Инициализация TiDB Cloud"""
     try:
         if not DATABASE_URL:
             logger.warning("⚠️ DATABASE_URL не задан")
             return None
         
-        # Парсим строку подключения
         db_config = parse_tidb_url(DATABASE_URL)
         if not db_config:
             return None
@@ -89,7 +88,6 @@ def init_tidb():
         test_conn = pymysql.connect(**db_config)
         cursor = test_conn.cursor()
         
-        # Создаем таблицу если нет
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS posts (
                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -101,7 +99,6 @@ def init_tidb():
                 char_count INT DEFAULT 0,
                 points INT DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
                 INDEX idx_chat_user (chat_id, user_id),
                 INDEX idx_character (character_name),
                 INDEX idx_date (message_date)
@@ -114,7 +111,7 @@ def init_tidb():
         logger.info("✅ TiDB Cloud инициализирована (5 ГБ бесплатно!)")
         
         # Создаем пул соединений
-        return pool.ConnectionPool(
+        return pymysql.pool.ConnectionPool(
             size=5,
             maxsize=20,
             **db_config
@@ -835,6 +832,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
