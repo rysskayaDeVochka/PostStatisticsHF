@@ -736,11 +736,11 @@ def test_tidb():
             "message": f"TiDB подключена! Результат: {result}"
         })
 
-except Exception as e:
-    return jsonify({
-        "success": False,
-        "error": str(e)
-    }), 500
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/test_tidb_connection')
 def test_tidb_connection():
@@ -816,6 +816,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
