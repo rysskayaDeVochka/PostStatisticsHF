@@ -177,35 +177,32 @@ def decline_posts(posts):
 
 # ==================== ФУНКЦИИ ДЛЯ TIDB ====================
 def save_to_tidb(chat_id, user_id, username, character_name, message_date, char_count, points):
-    """Сохраняем статистику в TiDB"""
+    """Сохраняем в таблицу posts"""
     try:
-        logger.info(f"🔄 Попытка сохранения в TiDB: {character_name}")
+        logger.info(f"🔄 Сохранение в TiDB: {character_name}")
         
-        # Получаем DATABASE_URL из переменных окружения
         db_url = os.getenv('DATABASE_URL')
         if not db_url:
             logger.error("❌ DATABASE_URL не найден")
             return False
         
-        # Парсим URL
         parsed = urllib.parse.urlparse(db_url)
         
-        # Подключаемся к TiDB
         conn = pymysql.connect(
             host=parsed.hostname,
             port=parsed.port or 4000,
             user=parsed.username,
             password=parsed.password,
-            database=parsed.path[1:] if parsed.path else 'test',
+            database='test',
             ssl={'ssl': {'ca': ''}},
             connect_timeout=10
         )
         
         cursor = conn.cursor()
         
-        # Создаем таблицу если не существует
+        # Создаем таблицу posts если нет
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS character_stats (
+            CREATE TABLE IF NOT EXISTS posts (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 chat_id BIGINT,
                 user_id BIGINT,
@@ -218,9 +215,9 @@ def save_to_tidb(chat_id, user_id, username, character_name, message_date, char_
             )
         ''')
         
-        # Вставляем данные
+        # Вставляем в posts
         cursor.execute('''
-            INSERT INTO character_stats 
+            INSERT INTO posts 
             (chat_id, user_id, username, character_name, message_date, char_count, points)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (chat_id, user_id, username, character_name, message_date, char_count, points))
@@ -228,13 +225,65 @@ def save_to_tidb(chat_id, user_id, username, character_name, message_date, char_
         conn.commit()
         conn.close()
         
-        logger.info(f"✅ Успешно сохранено в TiDB: {character_name}")
+        logger.info(f"✅ Успешно сохранено в posts: {character_name}")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения в TiDB: {e}")
+        logger.error(f"❌ Ошибка сохранения в posts: {e}")
         return False
+
+def get_stats_from_db(chat_id=None, user_id=None, date_filter=None):
+    """Читаем из таблицы posts"""
+    try:
+        logger.info(f"📊 Чтение из posts: chat={chat_id}, user={user_id}")
         
+        db_url = os.getenv('DATABASE_URL')
+        if not db_url:
+            logger.error("❌ DATABASE_URL не найден")
+            return None
+        
+        parsed = urllib.parse.urlparse(db_url)
+        
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 4000,
+            user=parsed.username,
+            password=parsed.password,
+            database='test',
+            ssl={'ssl': {'ca': ''}},
+            connect_timeout=10
+        )
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        query = "SELECT * FROM posts WHERE 1=1"
+        params = []
+        
+        if chat_id:
+            query += " AND chat_id = %s"
+            params.append(chat_id)
+        
+        if user_id:
+            query += " AND user_id = %s"
+            params.append(user_id)
+        
+        if date_filter == "today":
+            query += " AND DATE(message_date) = CURDATE()"
+        
+        query += " ORDER BY message_date DESC"
+        
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        
+        conn.close()
+        
+        logger.info(f"📊 Найдено в posts: {len(results)} записей")
+        return results
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка чтения из posts: {e}")
+        return None
+
 async def get_user_stats_tidb(chat_id, period='month'):
     """Получение статистики из TiDB"""
     if not db_pool:
@@ -913,6 +962,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
