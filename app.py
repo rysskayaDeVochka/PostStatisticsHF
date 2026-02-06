@@ -482,11 +482,13 @@ async def start_command(update: Update, context: CallbackContext):
         "🤖 Бот со статистикой!)\n\n"
         "📝 Как использовать:\n"
         "1. Пиши сообщение где ПЕРВАЯ строка - имя персонажа\n"
-        "2. Бот сохранит пост.\n\n"
+        "2. Бот сохранит пост\n"
+        "3. Используй команды\n\n"
         "📊 Команды:\n"
         "/stats [period] - статистика\n"
         "/top [period] - топ-10\n"
         "/mystats - личная статистика"
+        [period] - today, week, month, all"
     )
 
 async def stats_command(update: Update, context: CallbackContext):
@@ -619,6 +621,24 @@ async def top_command(update: Update, context: CallbackContext):
     await update.message.reply_text(text)
 
 async def mystats_command(update: Update, context: CallbackContext):
+
+    print(f"🔍 DEBUG mystats: начал, user_id={update.effective_user.id}")
+    print(f"🔍 DEBUG: db_pool = {db_pool}")
+    
+    # Проверяем инициализацию
+    global db_pool
+    if db_pool is None:
+        print(f"🔍 DEBUG: db_pool is None, инициализирую...")
+        db_pool = init_tidb()
+        print(f"🔍 DEBUG: после init_tidb, db_pool = {db_pool}")
+    
+    if not db_pool:
+        print(f"🔍 DEBUG: db_pool все еще None или False")
+        await update.message.reply_text("❌ База данных не доступна (db_pool не инициализирован)")
+        return
+    
+    # ... ваш существующий код ...    
+    
     if update.message.chat.type == 'private':
         return
     
@@ -1020,6 +1040,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
