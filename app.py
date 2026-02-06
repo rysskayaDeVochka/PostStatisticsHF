@@ -621,110 +621,97 @@ async def top_command(update: Update, context: CallbackContext):
     await update.message.reply_text(text)
 
 async def mystats_command(update: Update, context: CallbackContext):
-
-    print(f"🔍 DEBUG mystats: начал, user_id={update.effective_user.id}")
-    print(f"🔍 DEBUG: db_pool = {db_pool}")
-    
-    # Проверяем инициализацию
-    global db_pool
-    if db_pool is None:
-        print(f"🔍 DEBUG: db_pool is None, инициализирую...")
-        db_pool = init_tidb()
-        print(f"🔍 DEBUG: после init_tidb, db_pool = {db_pool}")
-    
-    if not db_pool:
-        print(f"🔍 DEBUG: db_pool все еще None или False")
-        await update.message.reply_text("❌ База данных не доступна (db_pool не инициализирован)")
-        return
-    
-    # ... ваш существующий код ...    
-    
-    if update.message.chat.type == 'private':
-        return
-    
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    username = update.effective_user.username or update.effective_user.first_name
-    display_name = f"@{username}" if update.effective_user.username else username
-    
-    if not db_pool:
-        await update.message.reply_text("❌ База данных не доступна")
-        return
-    
+    """Исправленная версия БЕЗ db_pool"""
     try:
-        conn = db_pool.connection()
-        cursor = conn.cursor(DictCursor)
+        print(f"🚨 mystats_command вызвана от {update.effective_user.id}")
         
-        # Персонажи пользователя
-        cursor.execute('''
-            SELECT 
-                character_name,
-                COUNT(*) as post_count,SUM(char_count) as char_count,
-                SUM(points) as points
-            FROM posts
-            WHERE chat_id = %s AND user_id = %s
-            GROUP BY character_name
-            ORDER BY points DESC
-        ''', (chat_id, user_id))
-        
-        character_stats = cursor.fetchall()
-        
-        # Общая статистика
-        cursor.execute('''
-            SELECT 
-                COUNT(*) as total_posts,
-                SUM(char_count) as total_chars,
-                SUM(points) as total_points
-            FROM posts 
-            WHERE chat_id = %s AND user_id = %s
-        ''', (chat_id, user_id))
-        
-        total_stats = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        if not character_stats:
-            await update.message.reply_text(f"📭 {display_name}, у вас пока нет постов в TiDB!")
+        if update.message.chat.type == 'private':
+            await update.message.reply_text("ℹ️ Эта команда работает только в группах!")
             return
         
-        total_posts = total_stats['total_posts'] if total_stats and total_stats['total_posts'] else 0
-        total_chars = total_stats['total_chars'] if total_stats and total_stats['total_chars'] else 0
-        total_points = total_stats['total_points'] if total_stats and total_stats['total_points'] else 0
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        username = update.effective_user.username or update.effective_user.first_name
+        display_name = f"@{username}" if update.effective_user.username else username
         
-        text = f"📊 ВАША СТАТИСТИКА {display_name.upper()} (TiDB):\n\n"
+        # Используем НОВУЮ функцию вместо db_pool
+        print(f"🚨 Получаю посты для user_id={user_id}, chat_id={chat_id}")
+        all_posts = await get_stats_from_db_async(chat_id=chat_id, user_id=user_id)
         
-        for char in character_stats:
-            posts = char['post_count']
-            chars = char['char_count']
-            points = char['points']
+        print(f"🚨 Найдено постов: {len(all_posts) if all_posts else 0}")
+        
+        if not all_posts:
+            await update.message.reply_text(
+                f"📊 ВАША СТАТИСТИКА {display_name.upper()}\n\n"
+                f"📭 У вас пока нет постов в базе данных!"
+            )
+            return
+        
+        # Преобразуем в формат статистики
+        user_stats = convert_posts_to_old_format(all_posts)
+        
+        if not user_stats or len(user_stats) == 0:
+            await update.message.reply_text("❌ Ошибка обработки данных")
+            return
+        
+        # Берем статистику текущего пользователя
+        if len(user_stats) > 0:
+            _, _, characters_json, posts, chars, points, char_count = user_stats[0]
             
             posts_word = decline_posts(posts)
             points_word = decline_points(points)
             
-            text += f"🎭 {char['character_name'].title()}:\n"
-            text += f"   📝 {posts} {posts_word}, {format_number(chars)} симв., {points} {points_word}\n\n"
-        
-        total_posts_word = decline_posts(total_posts)
-        total_points_word = decline_points(total_points)
-        
-        text += f"📈 ВАШИ ИТОГИ:\n"
-        text += f"• Персонажей: {len(character_stats)}\n"
-        text += f"• Постов: {total_posts} {total_posts_word}\n"
-        text += f"• Символов: {format_number(total_chars)}\n"
-        text += f"• Очков: {total_points} {total_points_word}"
-        
-        if character_stats:
-            best_char = character_stats[0]
-            best_points_word = decline_points(best_char['points'])
-            text += f"\n\n🏆 ВАШ ЛУЧШИЙ ПЕРСОНАЖ:\n"
-            text += f"{best_char['character_name'].title()} - {best_char['points']} {best_points_word}"
-        
-        await update.message.reply_text(text)
-        
+            text = f"📊 ВАША СТАТИСТИКА {display_name.upper()} (TiDB):\n\n"
+            
+            # Парсим персонажей
+            if characters_json and characters_json != 'null':
+                try:
+                    characters = json.loads(characters_json)
+                    if characters:
+                        # Сортируем персонажей по очкам
+                        characters.sort(key=lambda x: x.get('points', 0), reverse=True)
+                        
+                        for char in characters:
+                            char_name = char.get('name', 'Неизвестно').title()
+                            char_posts = char.get('posts', 0)
+                            char_chars = char.get('chars', 0)
+                            char_points = char.get('points', 0)
+                            
+                            char_posts_word = decline_posts(char_posts)
+                            char_points_word = decline_points(char_points)
+                            
+                            text += f"🎭 {char_name}:\n"
+                            text += f"   📝 {char_posts} {char_posts_word}, {format_number(char_chars)} симв., {char_points} {char_points_word}\n\n"
+                except Exception as e:
+                    print(f"❌ Ошибка парсинга персонажей: {e}")
+                    text += "🎭 Персонажи: данные не доступны\n\n"
+            
+            total_posts_word = decline_posts(posts)
+            total_points_word = decline_points(points)
+            
+            text += f"📈 ВАШИ ИТОГИ:\n"
+            text += f"• Персонажей: {char_count}\n"
+            text += f"• Постов: {posts} {total_posts_word}\n"
+            text += f"• Символов: {format_number(chars)}\n"
+            text += f"• Очков: {points} {total_points_word}"
+            
+            # Лучший персонаж
+            if characters and len(characters) > 0:
+                best_char = characters[0]
+                best_points_word = decline_points(best_char['points'])
+                text += f"\n\n🏆 ВАШ ЛУЧШИЙ ПЕРСОНАЖ:\n"
+                text += f"{best_char['name'].title()} - {best_char['points']} {best_points_word}"
+            
+            await update.message.reply_text(text)
+        else:
+            await update.message.reply_text("❌ Не удалось получить статистику")
+            
     except Exception as e:
-        logger.error(f"❌ Ошибка mystats: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        print(f"❌ Ошибка в mystats_command: {e}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
+        await update.message.reply_text(f"❌ Ошибка получения статистики")
+
 
 @app.route('/debug')
 def debug_info():
@@ -1040,6 +1027,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
