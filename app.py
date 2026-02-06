@@ -565,7 +565,7 @@ async def mystats_command(update: Update, context: CallbackContext):
         
     except Exception as e:
         logger.error(f"❌ Ошибка mystats: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {e}"
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
 @app.route('/debug')
 def debug_info():
@@ -881,6 +881,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
