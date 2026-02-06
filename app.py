@@ -303,98 +303,116 @@ def get_stats_from_db(chat_id=None, user_id=None, date_filter=None):
         logger.error(f"❌ Ошибка чтения из posts: {e}")
         return None
 
-async def get_user_stats_tidb(chat_id, period='month'):
-    """Получение статистики из TiDB"""
-    if not db_pool:
+def convert_posts_to_old_format(raw_stats):
+    """Преобразует сырые данные в старый формат"""
+    if not raw_stats:
         return []
     
-    now = datetime.now()
+    from collections import defaultdict
+    import json
     
-    # Условие для периода
-    if period == 'today':
-        start_date = now.date()
-        condition = "AND DATE(message_date) = %s"
-        params = (chat_id, start_date)
-    elif period == 'week':
-        start_date = now - timedelta(days=7)
-        condition = "AND message_date >= %s"
-        params = (chat_id, start_date)
-    elif period == 'month':
-        start_date = now - timedelta(days=30)
-        condition = "AND message_date >= %s"
-        params = (chat_id, start_date)
-    else:  # all
-        condition = ""
-        params = (chat_id,)
+    user_data = defaultdict(lambda: {
+        'username': '',
+        'posts': 0,
+        'chars': 0,
+        'points': 0,
+        'characters': {}
+    })
     
-    try:
-        conn = db_pool.connection()
-        cursor = conn.cursor(DictCursor)
+    for stat in raw_stats:
+        user_id = stat['user_id']
+        username = stat.get('username', f'user_{user_id}')
+        char_name = stat.get('character_name', 'Неизвестно')
+        char_count = stat.get('char_count', 0)
+        points = stat.get('points', 0)
         
-        query = f'''
-            SELECT 
-                user_id,
-                username,
-                character_name,
-                COUNT(*) as post_count,
-                SUM(char_count) as char_count,
-                SUM(points) as points
-            FROM posts
-            WHERE chat_id = %s
-            {condition}
-            GROUP BY user_id, character_name
-            ORDER BY user_id, SUM(points) DESC
-        '''
+        user_data[user_id]['username'] = username
+        user_data[user_id]['posts'] += 1
+        user_data[user_id]['chars'] += char_count
+        user_data[user_id]['points'] += points
         
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+        if char_name not in user_data[user_id]['characters']:
+            user_data[user_id]['characters'][char_name] = {
+                'posts': 0, 'chars': 0, 'points': 0
+            }
         
-        cursor.close()
-        conn.close()
-        
-        # Группируем результаты
-        user_stats = {}
-        for row in rows:
-            user_id = row['user_id']
-            if user_id not in user_stats:
-                user_stats[user_id] = {
-                    'username': row['username'],
-                    'total_posts': 0,
-                    'total_chars': 0,
-                    'total_points': 0,
-                    'characters': []
-                }
-            
-            user_stats[user_id]['characters'].append({
-                'name': row['character_name'],
-                'posts': row['post_count'],
-                'chars': row['char_count'],
-                'points': row['points']
+        user_data[user_id]['characters'][char_name]['posts'] += 1
+        user_data[user_id]['characters'][char_name]['chars'] += char_count
+        user_data[user_id]['characters'][char_name]['points'] += points
+    
+    results = []
+    for user_id, data in user_data.items():
+        characters_list = []
+        for char_name, char_data in data['characters'].items():
+            characters_list.append({
+                'name': char_name,
+                'posts': char_data['posts'],
+                'chars': char_data['chars'],
+                'points': char_data['points']
             })
+        
+        results.append((
+            user_id,
+            data['username'],
+            json.dumps(characters_list, ensure_ascii=False),
+            data['posts'],
+            data['chars'],
+            data['points'],
+            len(characters_list)
+        ))
+    
+    results.sort(key=lambda x: x[5], reverse=True)
+    return results
+
+
+async def get_user_stats_tidb(chat_id, period='month'):
+    """ОБНОВЛЕННАЯ версия - работает с таблицей posts"""
+    try:
+        # Получаем все посты для этого чата
+        all_posts = await get_stats_from_db_async(chat_id=chat_id)
+        
+        if not all_posts:
+            return []
+        
+        # Фильтруем по периоду
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        
+        filtered_posts = []
+        for post in all_posts:
+            post_date = post.get('message_date')
             
-            user_stats[user_id]['total_posts'] += row['post_count']
-            user_stats[user_id]['total_chars'] += row['char_count']
-            user_stats[user_id]['total_points'] += row['points']
+            if not post_date:
+                continue
+                
+            # Преобразуем строку в datetime если нужно
+            if isinstance(post_date, str):
+                try:
+                    post_date = datetime.fromisoformat(post_date.replace('Z', '+00:00'))
+                except:
+                    continue
+            
+            # Применяем фильтр по периоду
+            if period == 'today':
+                if post_date.date() != now.date():
+                    continue
+            elif period == 'week':
+                week_ago = now - timedelta(days=7)
+                if post_date < week_ago:
+                    continue
+            elif period == 'month':
+                month_ago = now - timedelta(days=30)
+                if post_date < month_ago:
+                    continue
+            # Для 'all' не фильтруем
+            
+            filtered_posts.append(post)
         
-        # Преобразуем в список
-        result = []
-        for user_id, data in user_stats.items():
-            result.append((
-                user_id,
-                data['username'],
-                json.dumps(data['characters'], ensure_ascii=False),
-                data['total_posts'],
-                data['total_chars'],
-                data['total_points'],
-                len(data['characters'])
-            ))
-        
-        # Сортируем по очкам
-        result.sort(key=lambda x: x[5], reverse=True)
-        return result
+        # Используем нашу функцию преобразования
+        return convert_posts_to_old_format(filtered_posts)
         
     except Exception as e:
-        logger.error(f"❌ Ошибка запроса к TiDB: {e}")
+        print(f"❌ Ошибка get_user_stats_tidb: {e}")
         return []
 
 # ==================== ОБРАБОТЧИКИ БОТА ====================
@@ -983,6 +1001,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
