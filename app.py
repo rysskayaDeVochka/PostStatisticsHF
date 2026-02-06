@@ -5,6 +5,7 @@ import logging
 import asyncio
 import sys
 import threading
+import urllib.parse
 from flask import Flask, jsonify, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
@@ -564,8 +565,65 @@ async def mystats_command(update: Update, context: CallbackContext):
         
     except Exception as e:
         logger.error(f"❌ Ошибка mystats: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}"
 
+@app.route('/debug')
+def debug_info():
+    """Показать диагностическую информацию"""
+    try:
+        # Проверяем DATABASE_URL
+        db_url = os.getenv('DATABASE_URL')
+        
+        info = {
+            "bot_status": "ready",
+            "database_connection": "not_connected",
+            "free_storage": "5 GB",
+            "status": "online",
+            "debug_details": {
+                "DATABASE_URL_exists": bool(db_url),
+                "DATABASE_URL_preview": db_url[:50] + "..." if db_url and len(db_url) > 50 else db_url,
+                "python_version": os.sys.version,
+                "current_time": datetime.now().isoformat()
+            }
+        }
+        
+        # Пробуем подключиться к TiDB
+        if db_url:
+            try:
+                parsed = urllib.parse.urlparse(db_url)
+                
+                # Формируем данные для теста
+                connection_params = {
+                    'host': parsed.hostname,
+                    'port': parsed.port or 4000,
+                    'user': parsed.username,
+                    'password': '****' if parsed.password else None,
+                    'database': parsed.path[1:] if parsed.path else 'test'
+                }
+                
+                # Тестируем подключение
+                test_conn = pymysql.connect(
+                    host=parsed.hostname,
+                    port=parsed.port or 4000,
+                    user=parsed.username,
+                    password=parsed.password,
+                    database=parsed.path[1:] if parsed.path else 'test',
+                    ssl={'ssl': {'ca': ''}},
+                    connect_timeout=5
+                )
+                
+                test_conn.close()
+                info["database_connection"] = "connected"
+                info["debug_details"]["connection_test"] = "success"
+                
+            except Exception as e:
+                info["debug_details"]["connection_error"] = str(e)
+                info["debug_details"]["error_type"] = type(e).__name__
+        
+        return jsonify(info)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # Регистрация обработчиков
 if telegram_app:
     telegram_app.add_handler(CommandHandler("start", start_command))
@@ -823,6 +881,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
