@@ -368,10 +368,14 @@ def convert_posts_to_old_format(raw_stats):
 async def get_user_stats_tidb(chat_id, period='month'):
     """ОБНОВЛЕННАЯ версия - работает с таблицей posts"""
     try:
+        print(f"🔍 DEBUG get_user_stats_tidb: начал, chat_id={chat_id}, period={period}")
+        
         # Получаем все посты для этого чата
         all_posts = await get_stats_from_db_async(chat_id=chat_id)
+        print(f"🔍 DEBUG: all_posts получено: {len(all_posts) if all_posts else 0}")
         
         if not all_posts:
+            print(f"🔍 DEBUG: all_posts пустой, возвращаем []")
             return []
         
         # Фильтруем по периоду
@@ -383,13 +387,15 @@ async def get_user_stats_tidb(chat_id, period='month'):
             post_date = post.get('message_date')
             
             if not post_date:
+                print(f"🔍 DEBUG: у поста нет message_date: {post}")
                 continue
                 
             # Преобразуем строку в datetime если нужно
             if isinstance(post_date, str):
                 try:
                     post_date = datetime.fromisoformat(post_date.replace('Z', '+00:00'))
-                except:
+                except Exception as e:
+                    print(f"🔍 DEBUG: ошибка преобразования даты: {e}")
                     continue
             
             # Применяем фильтр по периоду
@@ -408,11 +414,27 @@ async def get_user_stats_tidb(chat_id, period='month'):
             
             filtered_posts.append(post)
         
+        print(f"🔍 DEBUG: после фильтрации filtered_posts: {len(filtered_posts)}")
+        
+        if filtered_posts:
+            print(f"🔍 DEBUG: первый пост для конвертации: {filtered_posts[0]}")
+        
         # Используем нашу функцию преобразования
-        return convert_posts_to_old_format(filtered_posts)
+        result = convert_posts_to_old_format(filtered_posts)
+        
+        print(f"🔍 DEBUG: convert_posts_to_old_format вернул: {len(result) if result else 0} записей")
+        
+        if result:
+            print(f"🔍 DEBUG: первый результат: {result[0]}")
+            print(f"🔍 DEBUG: тип первого результата: {type(result[0])}")
+            print(f"🔍 DEBUG: длина первого результата: {len(result[0])}")
+        
+        return result
         
     except Exception as e:
         print(f"❌ Ошибка get_user_stats_tidb: {e}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
         return []
 
 # ==================== ОБРАБОТЧИКИ БОТА ====================
@@ -1001,6 +1023,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
