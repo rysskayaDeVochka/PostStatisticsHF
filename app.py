@@ -177,32 +177,64 @@ def decline_posts(posts):
 
 # ==================== ФУНКЦИИ ДЛЯ TIDB ====================
 def save_to_tidb(chat_id, user_id, username, character_name, message_date, char_count, points):
-    """Сохранение поста в TiDB"""
-    if not db_pool:
-        logger.error("❌ TiDB пул не инициализирован")
-        return False
-    
+    """Сохраняем статистику в TiDB"""
     try:
-        conn = db_pool.connection()
+        logger.info(f"🔄 Попытка сохранения в TiDB: {character_name}")
+        
+        # Получаем DATABASE_URL из переменных окружения
+        db_url = os.getenv('DATABASE_URL')
+        if not db_url:
+            logger.error("❌ DATABASE_URL не найден")
+            return False
+        
+        # Парсим URL
+        parsed = urllib.parse.urlparse(db_url)
+        
+        # Подключаемся к TiDB
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 4000,
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path[1:] if parsed.path else 'test',
+            ssl={'ssl': {'ca': ''}},
+            connect_timeout=10
+        )
+        
         cursor = conn.cursor()
         
+        # Создаем таблицу если не существует
         cursor.execute('''
-            INSERT INTO posts 
+            CREATE TABLE IF NOT EXISTS character_stats (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                chat_id BIGINT,
+                user_id BIGINT,
+                username VARCHAR(255),
+                character_name VARCHAR(255),
+                message_date DATETIME,
+                char_count INT,
+                points INT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Вставляем данные
+        cursor.execute('''
+            INSERT INTO character_stats 
             (chat_id, user_id, username, character_name, message_date, char_count, points)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (chat_id, user_id, username, character_name, message_date, char_count, points))
         
         conn.commit()
-        cursor.close()
         conn.close()
         
-        logger.info(f"✅ Сохранено в TiDB: {character_name} - {points} очков")
+        logger.info(f"✅ Успешно сохранено в TiDB: {character_name}")
         return True
         
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения в TiDB: {e}")
         return False
-
+        
 async def get_user_stats_tidb(chat_id, period='month'):
     """Получение статистики из TiDB"""
     if not db_pool:
@@ -881,6 +913,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
