@@ -232,6 +232,25 @@ def save_to_tidb(chat_id, user_id, username, character_name, message_date, char_
         logger.error(f"❌ Ошибка сохранения в posts: {e}")
         return False
 
+async def get_stats_from_db_async(chat_id=None, user_id=None, date_filter=None):
+    """Асинхронная версия чтения из posts таблицы"""
+    try:
+        # Делаем синхронный вызов в отдельном потоке
+        loop = asyncio.get_event_loop()
+        
+        # Синхронная функция для базы
+        def sync_get_stats():
+            return get_stats_from_db(chat_id, user_id, date_filter)
+        
+        # Выполняем в потоке
+        stats = await loop.run_in_executor(None, sync_get_stats)
+        return stats
+        
+    except Exception as e:
+        print(f"❌ Ошибка в get_stats_from_db_async: {e}")
+        return None
+
+
 def get_stats_from_db(chat_id=None, user_id=None, date_filter=None):
     """Читаем из таблицы posts"""
     try:
@@ -420,11 +439,10 @@ async def handle_message(update: Update, context: CallbackContext):
 
 async def start_command(update: Update, context: CallbackContext):
     await update.message.reply_text(
-        "🤖 Бот с TiDB Cloud (5 ГБ бесплатно!)\n\n"
+        "🤖 Бот со статистикой!)\n\n"
         "📝 Как использовать:\n"
         "1. Пиши сообщение где ПЕРВАЯ строка - имя персонажа\n"
-        "2. Бот автоматически сохраняет в TiDB\n"
-        "3. Чем длиннее пост - тем больше очков!\n\n"
+        "2. Бот сохранит пост.\n\n"
         "📊 Команды:\n"
         "/stats [period] - статистика\n"
         "/top [period] - топ-10\n"
@@ -456,7 +474,10 @@ async def stats_command(update: Update, context: CallbackContext):
             period = 'all'
             period_text = "за всё время"
     
-    results = await get_user_stats_tidb(chat_id, period)
+    if period == 'today':
+        results = await get_stats_from_db_async(chat_id=chat_id, date_filter="today")
+    else:
+        results = await get_user_stats_tidb(chat_id, period)
     
     if not results:
         await update.message.reply_text(f"📭 Нет данных {period_text}!")
@@ -962,6 +983,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
