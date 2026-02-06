@@ -488,7 +488,7 @@ async def start_command(update: Update, context: CallbackContext):
         "/stats [period] - статистика\n"
         "/top [period] - топ-10\n"
         "/mystats - личная статистика"
-        [period] - today, week, month, all"
+        "[period] - today, week, month, all"
     )
 
 async def stats_command(update: Update, context: CallbackContext):
@@ -1040,6 +1040,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
