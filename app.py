@@ -479,15 +479,15 @@ async def handle_message(update: Update, context: CallbackContext):
 
 async def start_command(update: Update, context: CallbackContext):
     await update.message.reply_text(
-        "🤖 Бот со статистикой!)\n\n"
+        "🤖 Бот со статистикой!\n\n"
         "📝 Как использовать:\n"
-        "1. Пиши сообщение где ПЕРВАЯ строка - имя персонажа\n"
+        "1. Пиши пост, где ПЕРВАЯ строка - имя персонажа\n"
         "2. Бот сохранит пост\n"
         "3. Используй команды\n\n"
         "📊 Команды:\n"
         "/stats [period] - статистика\n"
         "/top [period] - топ-10\n"
-        "/mystats - личная статистика"
+        "/mystats - личная статистика\n"
         "[period] - today, week, month, all"
     )
 
@@ -1027,6 +1027,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
