@@ -1398,7 +1398,7 @@ if telegram_app:
     telegram_app.add_handler(CommandHandler("backup", backup_command))
     telegram_app.add_handler(CommandHandler("restore", restore_command)) 
     telegram_app.add_handler(CommandHandler("dorestore", do_restore_command))
-    telegram_app.add_handler(MessageHandler(filters.DOCUMENT & ~filters.COMMAND, handle_document))
+    telegram_app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, handle_document))
     telegram_app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
@@ -1650,6 +1650,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
