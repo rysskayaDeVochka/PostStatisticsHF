@@ -1135,6 +1135,139 @@ async def restore_command(update: Update, context: CallbackContext):
         print(f"❌ Ошибка restore_command: {e}")
         await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
 
+async def do_restore_command(update: Update, context: CallbackContext):
+    """Выполняет восстановление после подтверждения"""
+    try:
+        # Проверка прав админа
+        chat_member = await update.effective_chat.get_member(update.effective_user.id)
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text("⛔ Только для администраторов!")
+            return
+        
+        # Проверяем подтверждение
+        args = context.args if context.args else []
+        if not args or args[0].lower() != 'confirm':
+            await update.message.reply_text(
+                "❌ Требуется подтверждение!\n"
+                "Напишите: `/dorestore confirm`"
+            )
+            return
+        
+        # Проверяем что есть данные для восстановления
+        if 'restore_data' not in context.user_data:
+            await update.message.reply_text(
+                "❌ Нет данных для восстановления\n"
+                "Сначала отправьте файл командой /restore"
+            )
+            return
+        
+        backup_data = context.user_data['restore_data']
+        chat_id = backup_data['chat_id']
+        
+        await update.message.reply_text("🔄 Начинаю восстановление...")
+        
+        # Выполняем восстановление
+        result = await restore_from_backup(backup_data)
+        
+        if result['success']:
+            restored = result['restored_count']
+            errors = result['error_count']
+            
+            message = (
+                f"✅ Восстановление завершено!\n\n"
+                f"📊 Результаты:\n"
+                f"• Успешно восстановлено: {restored} записей\n"
+                f"• Ошибок: {errors}\n"
+                f"• Удалено старых записей: {result.get('deleted_count', 0)}\n\n"
+            )
+            
+            if errors > 0:
+                message += f"⚠️ {errors} записей не восстановлено (см. логи)\n"
+            
+            message += f"🔄 Проверьте статистику командой /stats all"
+            
+            await update.message.reply_text(message)
+            
+            # Очищаем данные
+            context.user_data.pop('restore_data', None)
+            context.user_data.pop('restore_file', None)
+            
+        else:
+            await update.message.reply_text(
+                f"❌ Ошибка восстановления:\n{result.get('error', 'Неизвестная ошибка')}"
+            )
+        
+    except Exception as e:
+        print(f"❌ Ошибка do_restore_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+
+async def restore_from_backup(backup_data):
+    """Восстанавливает данные из резервной копии в базу"""
+    try:
+        chat_id = backup_data['chat_id']
+        posts = backup_data.get('posts', [])
+        
+        if not posts:
+            return {'success': False, 'error': 'Нет данных для восстановления'}
+        
+        db_url = os.getenv('DATABASE_URL')
+        parsed = urllib.parse.urlparse(db_url)
+        
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 4000,
+            user=parsed.username,
+            password=parsed.password,
+            database='test',
+            ssl={'ssl': {'ca': ''}}
+        )
+        
+        cursor = conn.cursor()
+        
+        # 1. Удаляем старые данные для этого чата
+        cursor.execute("DELETE FROM posts WHERE chat_id = %s", (chat_id,))
+        deleted_count = cursor.rowcount
+        
+        # 2. Восстанавливаем новые данные
+        restored_count = 0
+        error_count = 0
+        
+        for post in posts:
+            try:
+                cursor.execute('''
+                    INSERT INTO posts 
+                    (chat_id, user_id, username, character_name, message_date, char_count, points, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (
+                    post.get('chat_id'),
+                    post.get('user_id'),
+                    post.get('username'),
+                    post.get('character_name'),
+                    post.get('message_date'),
+                    post.get('char_count', 0),
+                    post.get('points', 0),
+                    post.get('created_at')
+                ))
+                restored_count += 1
+            except Exception as e:
+                print(f"❌ Ошибка восстановления записи: {e}")
+                error_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            'success': True,
+            'restored_count': restored_count,
+            'error_count': error_count,
+            'deleted_count': deleted_count,
+            'total_in_backup': len(posts)
+        }
+        
+    except Exception as e:
+        print(f"❌ Ошибка restore_from_backup: {e}")
+        return {'success': False, 'error': str(e)}
+
 @app.route('/debug')
 def debug_info():
     """Показать диагностическую информацию"""
@@ -1454,6 +1587,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
