@@ -522,7 +522,7 @@ async def stats_command(update: Update, context: CallbackContext):
         await update.message.reply_text(f"📭 Нет данных {period_text}!")
         return
     
-    text = f"📊 СТАТИСТИКА {period_text.upper()} (TiDB):\n\n"
+    text = f"📊 СТАТИСТИКА {period_text.upper()} :\n\n"
     
     for i, (user_id, username, characters_json, posts, chars, points, char_count) in enumerate(results, 1):
         posts_word = decline_posts(posts)
@@ -534,7 +534,7 @@ async def stats_command(update: Update, context: CallbackContext):
             try:
                 characters = json.loads(characters_json)
                 if characters:text += "  Персонажи:\n"
-                for char in characters[:3]:  # Показываем только топ-3
+                for char in characters:
                     char_name = char.get('name', 'Неизвестно')
                     char_posts = char.get('posts', 0)
                     char_chars = char.get('chars', 0)
@@ -591,7 +591,7 @@ async def top_command(update: Update, context: CallbackContext):
     
     emoji = {'today': '📅', 'week': '📆', 'month': '📊', 'all': '🏆'}.get(period, '🏆')
     
-    text = f"{emoji} ТОП-10 {period_text.upper()} (TiDB):\n\n"
+    text = f"{emoji} ТОП-10 {period_text.upper()} :\n\n"
     
     for i, (user_id, username, characters_json, posts, chars, points, char_count) in enumerate(top_users, 1):
         if i == 1: medal = "👑 "
@@ -661,7 +661,7 @@ async def mystats_command(update: Update, context: CallbackContext):
             posts_word = decline_posts(posts)
             points_word = decline_points(points)
             
-            text = f"📊 ВАША СТАТИСТИКА {display_name.upper()} (TiDB):\n\n"
+            text = f"📊 ВАША СТАТИСТИКА {display_name.upper()} :\n\n"
             
             # Парсим персонажей
             if characters_json and characters_json != 'null':
@@ -1650,6 +1650,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
