@@ -712,68 +712,65 @@ async def mystats_command(update: Update, context: CallbackContext):
         print(f"❌ Traceback: {traceback.format_exc()}")
         await update.message.reply_text(f"❌ Ошибка получения статистики")
 
-async def clear_stats_command(update: Update, context: CallbackContext):
-    """Очистка статистики (только для админов)"""
+async def clear_posts_from_db(chat_id, period='all'):
+    """Удаляет посты из базы данных"""
     try:
-        print(f"🚨 clear_stats вызвана от {update.effective_user.id}")
+        print(f"🗑️ Очистка постов: chat={chat_id}, period={period}")
         
-        # Проверяем что пользователь админ
-        chat_id = update.effective_chat.id
-        user_id = update.effective_user.id
+        db_url = os.getenv('DATABASE_URL')
+        if not db_url:
+            print("❌ DATABASE_URL не найден")
+            return -1
         
-        # Получаем информацию о пользователе в чате
-        chat_member = await update.effective_chat.get_member(user_id)
+        parsed = urllib.parse.urlparse(db_url)
         
-        # Разрешаем только создателям и админам
-        if chat_member.status not in ['creator', 'administrator']:
-            await update.message.reply_text(
-                "⛔ Эта команда только для администраторов чата!"
-            )
-            return
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 4000,
+            user=parsed.username,
+            password=parsed.password,
+            database='test',
+            ssl={'ssl': {'ca': ''}},
+            connect_timeout=10
+        )
         
-        # Запрашиваем подтверждение
-        args = context.args if context.args else []
+        cursor = conn.cursor()
         
-        if not args or args[0].lower() not in ['да', 'yes', 'confirm']:
-            await update.message.reply_text(
-                "⚠️ **ВНИМАНИЕ: Очистка статистики**\n\n"
-                "Эта команда УДАЛИТ ВСЕ данные статистики из базы данных.\n"
-                "Действие необратимо!\n\n"
-                "Для подтверждения напишите:\n"
-                "`/clearstats да`\n\n"
-                "Или укажите период:\n"
-                "`/clearstats today` - удалить только сегодняшние посты\n"
-                "`/clearstats week` - удалить посты за неделю\n"
-                "`/clearstats month` - удалить посты за месяц"
-            )
-            return
+        # Строим условие WHERE
+        where_clause = "WHERE chat_id = %s"
+        params = [chat_id]
         
-        # Получаем период очистки
-        period = args[0].lower()
+        if period == 'today':
+            where_clause += " AND DATE(message_date) = CURDATE()"
+        elif period == 'week':
+            where_clause += " AND message_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)"
+        elif period == 'month':
+            where_clause += " AND message_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"
+        # Для 'all', 'да', 'yes', 'confirm' - удаляем все
         
-        # Функция очистки
-        deleted_count = await clear_posts_from_db(chat_id, period)
+        # Сначала считаем сколько будет удалено
+        count_query = f"SELECT COUNT(*) FROM posts {where_clause}"
+        cursor.execute(count_query, params)
+        count_to_delete = cursor.fetchone()[0]
         
-        if deleted_count >= 0:
-            period_text = {
-                'да': 'все посты',
-                'yes': 'все посты',
-                'confirm': 'все посты',
-                'today': 'посты за сегодня',
-                'week': 'посты за неделю',
-                'month': 'посты за месяц'
-            }.get(period, period)
-            
-            await update.message.reply_text(
-                f"✅ Статистика очищена!\n"
-                f"🗑️ Удалено {deleted_count} {decline_posts(deleted_count)} ({period_text})."
-            )
-        else:
-            await update.message.reply_text("❌ Ошибка при очистке статистики")
-            
+        if count_to_delete == 0:
+            conn.close()
+            print(f"🗑️ Нет постов для удаления")
+            return 0
+        
+        # Удаляем посты
+        delete_query = f"DELETE FROM posts {where_clause}"
+        cursor.execute(delete_query, params)
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"🗑️ Удалено {count_to_delete} постов")
+        return count_to_delete
+        
     except Exception as e:
-        print(f"❌ Ошибка в clear_stats_command: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+        print(f"❌ Ошибка очистки постов: {e}")
+        return -1
 
 async def clear_stats_command(update: Update, context: CallbackContext):
     """Очистка статистики (только для админов)"""
@@ -1610,6 +1607,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
