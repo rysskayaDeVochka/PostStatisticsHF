@@ -712,6 +712,428 @@ async def mystats_command(update: Update, context: CallbackContext):
         print(f"❌ Traceback: {traceback.format_exc()}")
         await update.message.reply_text(f"❌ Ошибка получения статистики")
 
+async def clear_stats_command(update: Update, context: CallbackContext):
+    """Очистка статистики (только для админов)"""
+    try:
+        print(f"🚨 clear_stats вызвана от {update.effective_user.id}")
+        
+        # Проверяем что пользователь админ
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
+        # Получаем информацию о пользователе в чате
+        chat_member = await update.effective_chat.get_member(user_id)
+        
+        # Разрешаем только создателям и админам
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text(
+                "⛔ Эта команда только для администраторов чата!"
+            )
+            return
+        
+        # Запрашиваем подтверждение
+        args = context.args if context.args else []
+        
+        if not args or args[0].lower() not in ['да', 'yes', 'confirm']:
+            await update.message.reply_text(
+                "⚠️ **ВНИМАНИЕ: Очистка статистики**\n\n"
+                "Эта команда УДАЛИТ ВСЕ данные статистики из базы данных.\n"
+                "Действие необратимо!\n\n"
+                "Для подтверждения напишите:\n"
+                "`/clearstats да`\n\n"
+                "Или укажите период:\n"
+                "`/clearstats today` - удалить только сегодняшние посты\n"
+                "`/clearstats week` - удалить посты за неделю\n"
+                "`/clearstats month` - удалить посты за месяц"
+            )
+            return
+        
+        # Получаем период очистки
+        period = args[0].lower()
+        
+        # Функция очистки
+        deleted_count = await clear_posts_from_db(chat_id, period)
+        
+        if deleted_count >= 0:
+            period_text = {
+                'да': 'все посты',
+                'yes': 'все посты',
+                'confirm': 'все посты',
+                'today': 'посты за сегодня',
+                'week': 'посты за неделю',
+                'month': 'посты за месяц'
+            }.get(period, period)
+            
+            await update.message.reply_text(
+                f"✅ Статистика очищена!\n"
+                f"🗑️ Удалено {deleted_count} {decline_posts(deleted_count)} ({period_text})."
+            )
+        else:
+            await update.message.reply_text("❌ Ошибка при очистке статистики")
+            
+    except Exception as e:
+        print(f"❌ Ошибка в clear_stats_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+
+async def clear_stats_command(update: Update, context: CallbackContext):
+    """Очистка статистики (только для админов)"""
+    try:
+        print(f"🚨 clear_stats вызвана от {update.effective_user.id}")
+        
+        # Проверяем что пользователь админ
+        chat_id = update.effective_chat.id
+        user_id = update.effective_user.id
+        
+        # Получаем информацию о пользователе в чате
+        chat_member = await update.effective_chat.get_member(user_id)
+        
+        # Разрешаем только создателям и админам
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text(
+                "⛔ Эта команда только для администраторов чата!"
+            )
+            return
+        
+        # Запрашиваем подтверждение
+        args = context.args if context.args else []
+        
+        if not args or args[0].lower() not in ['да', 'yes', 'confirm']:
+            await update.message.reply_text(
+                "⚠️ **ВНИМАНИЕ: Очистка статистики**\n\n"
+                "Эта команда УДАЛИТ ВСЕ данные статистики из базы данных.\n"
+                "Действие необратимо!\n\n"
+                "Для подтверждения напишите:\n"
+                "`/clearstats да`\n\n"
+                "Или укажите период:\n"
+                "`/clearstats today` - удалить только сегодняшние посты\n"
+                "`/clearstats week` - удалить посты за неделю\n"
+                "`/clearstats month` - удалить посты за месяц"
+            )
+            return
+        
+        # Получаем период очистки
+        period = args[0].lower()
+        
+        # Функция очистки
+        deleted_count = await clear_posts_from_db(chat_id, period)
+        
+        if deleted_count >= 0:
+            period_text = {
+                'да': 'все посты',
+                'yes': 'все посты',
+                'confirm': 'все посты',
+                'today': 'посты за сегодня',
+                'week': 'посты за неделю',
+                'month': 'посты за месяц'
+            }.get(period, period)
+            
+            await update.message.reply_text(
+                f"✅ Статистика очищена!\n"
+                f"🗑️ Удалено {deleted_count} {decline_posts(deleted_count)} ({period_text})."
+            )
+        else:
+            await update.message.reply_text("❌ Ошибка при очистке статистики")
+            
+    except Exception as e:
+        print(f"❌ Ошибка в clear_stats_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+
+async def backup_command(update: Update, context: CallbackContext):
+    """Создает и отправляет резервную копию статистики"""
+    try:
+        # Проверка прав админа
+        chat_member = await update.effective_chat.get_member(update.effective_user.id)
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text("⛔ Только для администраторов!")
+            return
+        
+        chat_id = update.effective_chat.id
+        chat_title = update.effective_chat.title or f"Chat_{chat_id}"
+        
+        await update.message.reply_text("📦 Создаю резервную копию...")
+        
+        # Создаем резервную копию
+        backup_data = await create_backup_data(chat_id)
+        
+        if not backup_data:
+            await update.message.reply_text("❌ Нет данных для резервного копирования")
+            return
+        
+        # Сохраняем в файл JSON (лучше чем CSV для восстановления)
+        import json
+        from datetime import datetime
+        
+        filename = f"backup_{chat_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
+        
+        # Отправляем файл
+        with open(filename, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=filename,
+                caption=f"📦 Резервная копия статистики\n"
+                       f"Чат: {chat_title}\n"
+                       f"Записей: {len(backup_data.get('posts', []))}\n"
+                       f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+            )
+        
+        # Удаляем временный файл
+        import os
+        os.remove(filename)
+        
+        await update.message.reply_text(
+            "✅ Резервная копия создана!\n\n"
+            "📌 Для восстановления:\n"
+            "1. Сохраните этот файл\n"
+            "2. Отправьте его боту командой /restore"
+        )
+        
+    except Exception as e:
+        print(f"❌ Ошибка backup_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+
+async def create_backup_data(chat_id):
+    """Создает структуру данных для резервного копирования"""
+    try:
+        db_url = os.getenv('DATABASE_URL')
+        parsed = urllib.parse.urlparse(db_url)
+        
+        conn = pymysql.connect(
+            host=parsed.hostname,
+            port=parsed.port or 4000,
+            user=parsed.username,
+            password=parsed.password,
+            database='test',
+            ssl={'ssl': {'ca': ''}}
+        )
+        
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # Получаем все посты
+        cursor.execute('''
+            SELECT * FROM posts 
+            WHERE chat_id = %s 
+            ORDER BY id ASC
+        ''', (chat_id,))
+        
+        posts = cursor.fetchall()
+        conn.close()
+        
+        # Создаем структуру данных
+        backup_data = {
+            'chat_id': chat_id,
+            'backup_date': datetime.now().isoformat(),
+            'total_posts': len(posts),
+            'posts': posts
+        }
+        
+        return backup_data
+        
+    except Exception as e:
+        print(f"❌ Ошибка create_backup_data: {e}")
+        return None
+
+async def restore_command(update: Update, context: CallbackContext):
+    """Восстанавливает статистику из резервной копии"""
+    try:
+        # Проверка прав админа
+        chat_member = await update.effective_chat.get_member(update.effective_user.id)
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text("⛔ Только для администраторов!")
+            return
+        
+        # Проверяем что есть документ
+        if not update.message.document:
+            await update.message.reply_text(
+                "📤 Для восстановления:\n\n"
+                "1. Создайте резервную копию командой /backup\n"
+                "2. Сохраните файл\n"
+                "3. Отправьте файл боту с командой /restore\n\n"
+                "Или отправьте файл и напишите:\n"
+                "`/restore`"
+            )
+            return
+        
+        document = update.message.document
+        
+        # Проверяем что это JSON файл
+        if not document.file_name.endswith('.json'):
+            await update.message.reply_text(
+                "❌ Файл должен быть в формате JSON\n"
+                "(создайте командой /backup)"
+            )
+            return
+        
+        await update.message.reply_text("🔄 Загружаю и проверяю файл...")
+        
+        # Скачиваем файл
+        file = await document.get_file()
+        temp_file = f"temp_restore_{document.file_id}.json"
+        await file.download_to_drive(temp_file)
+        
+        # Читаем и проверяем файл
+        import json
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            try:
+                backup_data = json.load(f)
+            except json.JSONDecodeError:
+                await update.message.reply_text("❌ Ошибка чтения файла. Неверный формат JSON")
+                import os
+                os.remove(temp_file)
+                return
+        
+        # Проверяем структуру данных
+        required_keys = ['chat_id', 'backup_date', 'posts']
+        for key in required_keys:
+            if key not in backup_data:
+                await update.message.reply_text(f"❌ Неверный формат файла: нет ключа '{key}'")
+                import os
+                os.remove(temp_file)
+                return
+        
+        # Показываем информацию о бэкапе
+        chat_id = backup_data['chat_id']
+        backup_date = backup_data.get('backup_date', 'неизвестно')
+        total_posts = len(backup_data.get('posts', []))
+        
+        info_text = (
+            f"📋 Информация о резервной копии:\n"
+            f"• Чат ID: {chat_id}\n"
+            f"• Дата создания: {backup_date}\n"
+            f"• Записей: {total_posts}\n\n"
+        )
+        
+        # Показываем пример данных
+        if total_posts > 0:
+            sample = backup_data['posts'][0]
+            info_text += f"Пример записи:\n"
+            info_text += f"• Пользователь: {sample.get('username', 'N/A')}\n"
+            info_text += f"• Персонаж: {sample.get('character_name', 'N/A')}\n"
+            info_text += f"• Дата: {sample.get('message_date', 'N/A')}\n"
+        
+        # Запрашиваем подтверждение
+        await update.message.reply_text(
+            info_text + "\n" +
+            "⚠️ **ВНИМАНИЕ:**\n"
+            "При восстановлении СУЩЕСТВУЮЩИЕ данные будут:\n"
+            "1. УДАЛЕНЫ (для этого чата)\n"
+            "2. ЗАМЕНЕНЫ на данные из резервной копии\n\n"
+            "Для подтверждения напишите:\n"
+            "`/dorestore confirm`"
+        )
+        
+        # Сохраняем данные в контексте для следующего шага
+        context.user_data['restore_data'] = backup_data
+        context.user_data['restore_file'] = temp_file
+        
+        import os
+        os.remove(temp_file)
+        
+    except Exception as e:
+        print(f"❌ Ошибка restore_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
+
+async def restore_command(update: Update, context: CallbackContext):
+    """Восстанавливает статистику из резервной копии"""
+    try:
+        # Проверка прав админа
+        chat_member = await update.effective_chat.get_member(update.effective_user.id)
+        if chat_member.status not in ['creator', 'administrator']:
+            await update.message.reply_text("⛔ Только для администраторов!")
+            return
+        
+        # Проверяем что есть документ
+        if not update.message.document:
+            await update.message.reply_text(
+                "📤 Для восстановления:\n\n"
+                "1. Создайте резервную копию командой /backup\n"
+                "2. Сохраните файл\n"
+                "3. Отправьте файл боту с командой /restore\n\n"
+                "Или отправьте файл и напишите:\n"
+                "`/restore`"
+            )
+            return
+        
+        document = update.message.document
+        
+        # Проверяем что это JSON файл
+        if not document.file_name.endswith('.json'):
+            await update.message.reply_text(
+                "❌ Файл должен быть в формате JSON\n"
+                "(создайте командой /backup)"
+            )
+            return
+        
+        await update.message.reply_text("🔄 Загружаю и проверяю файл...")
+        
+        # Скачиваем файл
+        file = await document.get_file()
+        temp_file = f"temp_restore_{document.file_id}.json"
+        await file.download_to_drive(temp_file)
+        
+        # Читаем и проверяем файл
+        import json
+        with open(temp_file, 'r', encoding='utf-8') as f:
+            try:
+                backup_data = json.load(f)
+            except json.JSONDecodeError:
+                await update.message.reply_text("❌ Ошибка чтения файла. Неверный формат JSON")
+                import os
+                os.remove(temp_file)
+                return
+        
+        # Проверяем структуру данных
+        required_keys = ['chat_id', 'backup_date', 'posts']
+        for key in required_keys:
+            if key not in backup_data:
+                await update.message.reply_text(f"❌ Неверный формат файла: нет ключа '{key}'")
+                import os
+                os.remove(temp_file)
+                return
+        
+        # Показываем информацию о бэкапе
+        chat_id = backup_data['chat_id']
+        backup_date = backup_data.get('backup_date', 'неизвестно')
+        total_posts = len(backup_data.get('posts', []))
+        
+        info_text = (
+            f"📋 Информация о резервной копии:\n"
+            f"• Чат ID: {chat_id}\n"
+            f"• Дата создания: {backup_date}\n"
+            f"• Записей: {total_posts}\n\n"
+        )
+        
+        # Показываем пример данных
+        if total_posts > 0:
+            sample = backup_data['posts'][0]
+            info_text += f"Пример записи:\n"
+            info_text += f"• Пользователь: {sample.get('username', 'N/A')}\n"
+            info_text += f"• Персонаж: {sample.get('character_name', 'N/A')}\n"
+            info_text += f"• Дата: {sample.get('message_date', 'N/A')}\n"
+        
+        # Запрашиваем подтверждение
+        await update.message.reply_text(
+            info_text + "\n" +
+            "⚠️ **ВНИМАНИЕ:**\n"
+            "При восстановлении СУЩЕСТВУЮЩИЕ данные будут:\n"
+            "1. УДАЛЕНЫ (для этого чата)\n"
+            "2. ЗАМЕНЕНЫ на данные из резервной копии\n\n"
+            "Для подтверждения напишите:\n"
+            "`/dorestore confirm`"
+        )
+        
+        # Сохраняем данные в контексте для следующего шага
+        context.user_data['restore_data'] = backup_data
+        context.user_data['restore_file'] = temp_file
+        
+        import os
+        os.remove(temp_file)
+        
+    except Exception as e:
+        print(f"❌ Ошибка restore_command: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
 
 @app.route('/debug')
 def debug_info():
@@ -770,12 +1192,17 @@ def debug_info():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+        
 # Регистрация обработчиков
 if telegram_app:
     telegram_app.add_handler(CommandHandler("start", start_command))
     telegram_app.add_handler(CommandHandler("stats", stats_command))
     telegram_app.add_handler(CommandHandler("top", top_command))
     telegram_app.add_handler(CommandHandler("mystats", mystats_command))
+    telegram_app.add_handler(CommandHandler("clearstats", clear_stats_command))
+    telegram_app.add_handler(CommandHandler("backup", backup_command))
+    telegram_app.add_handler(CommandHandler("restore", restore_command)) 
+    telegram_app.add_handler(CommandHandler("dorestore", do_restore_command))
     telegram_app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
@@ -1027,6 +1454,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
