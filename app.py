@@ -1058,80 +1058,97 @@ async def restore_command(update: Update, context: CallbackContext):
 async def restore_command(update: Update, context: CallbackContext):
     """Восстанавливает статистику из резервной копии"""
     try:
+        print(f"🔄 restore_command вызвана от {update.effective_user.id}")
+        
         # Проверка прав админа
         chat_member = await update.effective_chat.get_member(update.effective_user.id)
         if chat_member.status not in ['creator', 'administrator']:
             await update.message.reply_text("⛔ Только для администраторов!")
             return
         
-        # Проверяем что есть документ
-        if not update.message.document:
+        # Проверяем есть ли сохраненный файл
+        if 'pending_restore_file' not in context.user_data:
             await update.message.reply_text(
                 "📤 Для восстановления:\n\n"
-                "1. Создайте резервную копию командой /backup\n"
+                "1. Создайте резервную копию командой `/backup`\n"
                 "2. Сохраните файл\n"
-                "3. Отправьте файл боту с командой /restore\n\n"
+                "3. Отправьте файл боту\n"
+                "4. Напишите `/restore`\n\n"
                 "Или отправьте файл и напишите:\n"
                 "`/restore`"
             )
             return
         
-        document = update.message.document
-        
-        # Проверяем что это JSON файл
-        if not document.file_name.endswith('.json'):
-            await update.message.reply_text(
-                "❌ Файл должен быть в формате JSON\n"
-                "(создайте командой /backup)"
-            )
-            return
+        file_info = context.user_data['pending_restore_file']
         
         await update.message.reply_text("🔄 Загружаю и проверяю файл...")
         
         # Скачиваем файл
-        file = await document.get_file()
-        temp_file = f"temp_restore_{document.file_id}.json"
-        await file.download_to_drive(temp_file)
+        document = await context.bot.get_file(file_info['file_id'])
+        temp_file = f"temp_restore_{file_info['file_id']}.json"
+        await document.download_to_drive(temp_file)
         
-        # Читаем и проверяем файл
+        # Читаем файл
         import json
         with open(temp_file, 'r', encoding='utf-8') as f:
             try:
                 backup_data = json.load(f)
-            except json.JSONDecodeError:
-                await update.message.reply_text("❌ Ошибка чтения файла. Неверный формат JSON")
+            except json.JSONDecodeError as e:
+                await update.message.reply_text(f"❌ Ошибка чтения JSON: {e}")
                 import os
-                os.remove(temp_file)
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                context.user_data.pop('pending_restore_file', None)
                 return
         
-        # Проверяем структуру данных
+        # Проверяем структуру
         required_keys = ['chat_id', 'backup_date', 'posts']
         for key in required_keys:
             if key not in backup_data:
                 await update.message.reply_text(f"❌ Неверный формат файла: нет ключа '{key}'")
                 import os
-                os.remove(temp_file)
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                context.user_data.pop('pending_restore_file', None)
                 return
         
-        # Показываем информацию о бэкапе
+        # Показываем информацию
         chat_id = backup_data['chat_id']
         backup_date = backup_data.get('backup_date', 'неизвестно')
         total_posts = len(backup_data.get('posts', []))
         
+        from datetime import datetime
+        try:
+            backup_dt = datetime.fromisoformat(backup_date.replace('Z', '+00:00'))
+            backup_date_str = backup_dt.strftime('%d.%m.%Y %H:%M')
+        except:
+            backup_date_str = backup_date
+        
         info_text = (
             f"📋 Информация о резервной копии:\n"
             f"• Чат ID: {chat_id}\n"
-            f"• Дата создания: {backup_date}\n"
+            f"• Дата создания: {backup_date_str}\n"
             f"• Записей: {total_posts}\n\n"
         )
         
-        # Показываем пример данных
+        # Показываем пример
         if total_posts > 0:
             sample = backup_data['posts'][0]
             info_text += f"Пример записи:\n"
             info_text += f"• Пользователь: {sample.get('username', 'N/A')}\n"
             info_text += f"• Персонаж: {sample.get('character_name', 'N/A')}\n"
-            info_text += f"• Дата: {sample.get('message_date', 'N/A')}\n"
+            info_text += f"• Дата: {sample.get('message_date', 'N/A')[:10]}\n"
+        
+        # Сохраняем данные
+        context.user_data['restore_data'] = backup_data
+        
+        # Удаляем временный файл
+        import os
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        
+        # Удаляем информацию о файле
+        context.user_data.pop('pending_restore_file', None)
         
         # Запрашиваем подтверждение
         await update.message.reply_text(
@@ -1144,15 +1161,10 @@ async def restore_command(update: Update, context: CallbackContext):
             "`/dorestore confirm`"
         )
         
-        # Сохраняем данные в контексте для следующего шага
-        context.user_data['restore_data'] = backup_data
-        context.user_data['restore_file'] = temp_file
-        
-        import os
-        os.remove(temp_file)
-        
     except Exception as e:
         print(f"❌ Ошибка restore_command: {e}")
+        import traceback
+        print(f"❌ Traceback: {traceback.format_exc()}")
         await update.message.reply_text(f"❌ Ошибка: {str(e)[:100]}")
 
 async def do_restore_command(update: Update, context: CallbackContext):
@@ -1288,6 +1300,36 @@ async def restore_from_backup(backup_data):
         print(f"❌ Ошибка restore_from_backup: {e}")
         return {'success': False, 'error': str(e)}
 
+async def handle_document(update: Update, context: CallbackContext):
+    """Обработка отправленных документов (для восстановления)"""
+    try:
+        print(f"📄 Документ получен: {update.message.document.file_name}")
+        
+        # Проверяем что это JSON файл для восстановления
+        if update.message.document.file_name.endswith('.json'):
+            # Сохраняем информацию о файле в контекст
+            context.user_data['pending_restore_file'] = {
+                'file_id': update.message.document.file_id,
+                'file_name': update.message.document.file_name,
+                'chat_id': update.effective_chat.id,
+                'user_id': update.effective_user.id
+            }
+            
+            await update.message.reply_text(
+                f"📦 Файл '{update.message.document.file_name}' получен!\n\n"
+                f"Для восстановления статистики напишите:\n"
+                f"`/restore`"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Файл должен быть в формате JSON\n"
+                "(создайте командой /backup)"
+            )
+            
+    except Exception as e:
+        print(f"❌ Ошибка handle_document: {e}")
+        await update.message.reply_text(f"❌ Ошибка обработки файла: {str(e)[:100]}")
+
 @app.route('/debug')
 def debug_info():
     """Показать диагностическую информацию"""
@@ -1356,6 +1398,7 @@ if telegram_app:
     telegram_app.add_handler(CommandHandler("backup", backup_command))
     telegram_app.add_handler(CommandHandler("restore", restore_command)) 
     telegram_app.add_handler(CommandHandler("dorestore", do_restore_command))
+    telegram_app.add_handler(MessageHandler(filters.DOCUMENT & ~filters.COMMAND, handle_document))
     telegram_app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS,
         handle_message
@@ -1607,6 +1650,7 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     logger.info(f"🚀 TiDB Cloud Bot starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
 
 
